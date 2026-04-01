@@ -1,0 +1,53 @@
+# ===== Secrets & Environment =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.p12
+credentials.json
+secrets.yaml
+secrets.toml
+
+# ===== Rust =====
+/target/
+**/*.rs.bk
+Cargo.lock
+# Note: uncomment above if this is a library, keep committed for binaries
+
+# ===== Node / Vue =====
+node_modules/
+dist/
+.output/
+.nuxt/
+*.local
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ===== OS =====
+Thumbs.db
+Desktop.ini
+
+# ===== Build artifacts =====
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# ===== Docker =====
+docker-compose.override.yml
+
+# ===== Testing =====
+coverage/
+*.lcov
+htmlcov/
+
+# ===== Worktrees =====
+.worktrees/
