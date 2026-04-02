@@ -13,8 +13,8 @@ secrets.toml
 # ===== Rust =====
 /target/
 **/*.rs.bk
-Cargo.lock
-# Note: uncomment above if this is a library, keep committed for binaries
+# Cargo.lock — committed for binary projects, uncomment for libraries
+# Cargo.lock
 
 # ===== Node / Vue =====
 node_modules/
