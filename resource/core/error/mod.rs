@@ -17,6 +17,7 @@ pub enum AppError {
     Request(#[from] reqwest::Error),
 
     #[error("Internal error: {0}")]
+    #[allow(dead_code)]
     Internal(String),
 }
 
