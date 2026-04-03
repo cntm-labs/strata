@@ -1,10 +1,18 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
 
 jobs:
   fmt:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -13,6 +21,9 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -22,6 +33,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:16-alpine
@@ -33,7 +47,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { components: llvm-tools-preview }
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-llvm-cov
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
         env:
           DATABASE_URL: postgres://test:test@localhost:5432/strata_test
@@ -44,8 +60,11 @@ jobs:
 
   dashboard:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
-      - run: cd dashboard && npm ci && npm run build
+      - run: cd dashboard && npm ci && npm run typecheck && npm run lint && npm run build
