@@ -22,6 +22,7 @@ jobs:
       pull-requests: write
       contents: read
       issues: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
