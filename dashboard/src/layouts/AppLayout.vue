@@ -1,6 +1,6 @@
 <template>
   <div class="flex h-screen bg-base-100">
-    <Sidebar />
+    <AppSidebar />
     <main class="flex-1 overflow-auto p-6">
       <RouterView />
     </main>
@@ -8,5 +8,5 @@
 </template>
 
 <script setup lang="ts">
-import Sidebar from "./Sidebar.vue";
+import AppSidebar from './AppSidebar.vue'
 </script>

@@ -1,8 +1,6 @@
 <template>
   <div class="max-w-2xl">
-    <h1 class="text-2xl font-bold mb-6">
-      {{ isNew ? "Add" : "Edit" }} Data Source
-    </h1>
+    <h1 class="text-2xl font-bold mb-6">{{ isNew ? 'Add' : 'Edit' }} Data Source</h1>
 
     <form @submit.prevent="save" class="space-y-4">
       <div class="form-control">
@@ -23,12 +21,7 @@
 
       <div class="form-control">
         <label class="label">URL</label>
-        <InputText
-          v-model="form.url"
-          class="w-full"
-          :placeholder="urlPlaceholder"
-          required
-        />
+        <InputText v-model="form.url" class="w-full" :placeholder="urlPlaceholder" required />
       </div>
 
       <div class="form-control">
@@ -52,52 +45,52 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, computed } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { datasourcesApi } from "@/api/datasources";
-import InputText from "primevue/inputtext";
-import Select from "primevue/select";
+import { onMounted, reactive, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { datasourcesApi } from '@/api/datasources'
+import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
 
-const route = useRoute();
-const router = useRouter();
-const isNew = computed(() => route.name === "datasource-new");
+const route = useRoute()
+const router = useRouter()
+const isNew = computed(() => route.name === 'datasource-new')
 
 const typeOptions = [
-  { label: "Prometheus", value: "prometheus" },
-  { label: "Loki", value: "loki" },
-  { label: "PostgreSQL", value: "postgresql" },
-];
+  { label: 'Prometheus', value: 'prometheus' },
+  { label: 'Loki', value: 'loki' },
+  { label: 'PostgreSQL', value: 'postgresql' },
+]
 
 const form = reactive({
-  name: "",
-  type: "prometheus" as "prometheus" | "loki" | "postgresql",
-  url: "",
-  credentials: "",
+  name: '',
+  type: 'prometheus' as 'prometheus' | 'loki' | 'postgresql',
+  url: '',
+  credentials: '',
   is_default: false,
-});
+})
 
 const urlPlaceholder = computed(() => {
   const placeholders: Record<string, string> = {
-    prometheus: "http://prometheus:9090",
-    loki: "http://loki:3100",
-    postgresql: "postgres://user:pass@host:5432/db",
-  };
-  return placeholders[form.type] || "";
-});
+    prometheus: 'http://prometheus:9090',
+    loki: 'http://loki:3100',
+    postgresql: 'postgres://user:pass@host:5432/db',
+  }
+  return placeholders[form.type] || ''
+})
 
 async function save() {
   if (isNew.value) {
-    await datasourcesApi.create(form);
+    await datasourcesApi.create(form)
   } else {
-    await datasourcesApi.update(route.params.id as string, form);
+    await datasourcesApi.update(route.params.id as string, form)
   }
-  router.push("/datasources");
+  router.push('/datasources')
 }
 
 onMounted(async () => {
   if (!isNew.value) {
-    const data = await datasourcesApi.get(route.params.id as string);
-    Object.assign(form, data);
+    const data = await datasourcesApi.get(route.params.id as string)
+    Object.assign(form, data)
   }
-});
+})
 </script>

@@ -1,10 +1,5 @@
 <template>
-  <Dialog
-    v-model:visible="visible"
-    header="Edit Panel"
-    :style="{ width: '640px' }"
-    modal
-  >
+  <Dialog v-model:visible="visible" header="Edit Panel" :style="{ width: '640px' }" modal>
     <form @submit.prevent="save" class="space-y-4">
       <div class="form-control">
         <label class="label">Title</label>
@@ -36,11 +31,7 @@
 
       <div class="form-control">
         <label class="label">Query</label>
-        <MonacoEditor
-          v-model="form.query"
-          :language="queryLanguage"
-          :height="120"
-        />
+        <MonacoEditor v-model="form.query" :language="queryLanguage" :height="120" />
       </div>
 
       <div class="grid grid-cols-4 gap-2">
@@ -63,9 +54,7 @@
       </div>
 
       <div class="flex gap-2 justify-end">
-        <button type="button" class="btn btn-ghost" @click="visible = false">
-          Cancel
-        </button>
+        <button type="button" class="btn btn-ghost" @click="visible = false">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>
@@ -73,97 +62,97 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted, watch } from "vue";
-import { datasourcesApi } from "@/api/datasources";
-import MonacoEditor from "./MonacoEditor.vue";
-import Dialog from "primevue/dialog";
-import InputText from "primevue/inputtext";
-import InputNumber from "primevue/inputnumber";
-import Select from "primevue/select";
-import type { Datasource, Panel } from "@/types";
+import { reactive, ref, computed, onMounted, watch } from 'vue'
+import { datasourcesApi } from '@/api/datasources'
+import MonacoEditor from './MonacoEditor.vue'
+import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
+import Select from 'primevue/select'
+import type { Datasource, Panel } from '@/types'
 
-const props = defineProps<{ panel?: Panel }>();
+const props = defineProps<{ panel?: Panel }>()
 const emit = defineEmits<{
   save: [
     data: {
-      title: string;
-      type: string;
-      datasource_id: string;
-      query: string;
-      position: { x: number; y: number; w: number; h: number };
+      title: string
+      type: string
+      datasource_id: string
+      query: string
+      position: { x: number; y: number; w: number; h: number }
     },
-  ];
-}>();
+  ]
+}>()
 
-const visible = defineModel<boolean>("visible", { default: false });
-const datasources = ref<Datasource[]>([]);
+const visible = defineModel<boolean>('visible', { default: false })
+const datasources = ref<Datasource[]>([])
 
 const panelTypes = [
-  { label: "Time Series", value: "timeseries" },
-  { label: "Stat", value: "stat" },
-  { label: "Gauge", value: "gauge" },
-  { label: "Table", value: "table" },
-  { label: "Bar Chart", value: "bar" },
-  { label: "Heatmap", value: "heatmap" },
-  { label: "Pie Chart", value: "piechart" },
-  { label: "Logs", value: "logs" },
-];
+  { label: 'Time Series', value: 'timeseries' },
+  { label: 'Stat', value: 'stat' },
+  { label: 'Gauge', value: 'gauge' },
+  { label: 'Table', value: 'table' },
+  { label: 'Bar Chart', value: 'bar' },
+  { label: 'Heatmap', value: 'heatmap' },
+  { label: 'Pie Chart', value: 'piechart' },
+  { label: 'Logs', value: 'logs' },
+]
 
 const form = reactive({
-  title: "",
-  type: "timeseries",
-  datasource_id: "",
-  query: "",
+  title: '',
+  type: 'timeseries',
+  datasource_id: '',
+  query: '',
   x: 0,
   y: 0,
   w: 6,
   h: 3,
-});
+})
 
 const queryLanguage = computed(() => {
-  const ds = datasources.value.find((d) => d.id === form.datasource_id);
-  if (ds?.type === "postgresql") return "sql";
-  return "promql";
-});
+  const ds = datasources.value.find((d) => d.id === form.datasource_id)
+  if (ds?.type === 'postgresql') return 'sql'
+  return 'promql'
+})
 
 watch(
   () => props.panel,
   (p) => {
     if (p) {
-      form.title = p.title;
-      form.type = p.type;
-      form.datasource_id = p.datasource_id || "";
-      form.query = p.query;
-      form.x = p.position.x;
-      form.y = p.position.y;
-      form.w = p.position.w;
-      form.h = p.position.h;
+      form.title = p.title
+      form.type = p.type
+      form.datasource_id = p.datasource_id || ''
+      form.query = p.query
+      form.x = p.position.x
+      form.y = p.position.y
+      form.w = p.position.w
+      form.h = p.position.h
     } else {
-      form.title = "";
-      form.type = "timeseries";
-      form.datasource_id = "";
-      form.query = "";
-      form.x = 0;
-      form.y = 0;
-      form.w = 6;
-      form.h = 3;
+      form.title = ''
+      form.type = 'timeseries'
+      form.datasource_id = ''
+      form.query = ''
+      form.x = 0
+      form.y = 0
+      form.w = 6
+      form.h = 3
     }
   },
   { immediate: true },
-);
+)
 
 function save() {
-  emit("save", {
+  emit('save', {
     title: form.title,
     type: form.type,
     datasource_id: form.datasource_id,
     query: form.query,
     position: { x: form.x, y: form.y, w: form.w, h: form.h },
-  });
-  visible.value = false;
+  })
+  visible.value = false
 }
 
 onMounted(async () => {
-  datasources.value = await datasourcesApi.list();
-});
+  datasources.value = await datasourcesApi.list()
+})
 </script>

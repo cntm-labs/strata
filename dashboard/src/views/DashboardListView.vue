@@ -7,11 +7,7 @@
       </RouterLink>
     </div>
 
-    <InputText
-      v-model="search"
-      placeholder="Search dashboards..."
-      class="w-full mb-6"
-    />
+    <InputText v-model="search" placeholder="Search dashboards..." class="w-full mb-6" />
 
     <div v-if="loading" class="flex justify-center p-8">
       <ProgressSpinner />
@@ -31,15 +27,12 @@
             <div class="card-body p-4">
               <div class="flex items-center justify-between">
                 <h3 class="card-title text-lg">{{ dash.title }}</h3>
-                <button
-                  class="btn btn-ghost btn-sm"
-                  @click.stop="toggleStar(dash.slug)"
-                >
+                <button class="btn btn-ghost btn-sm" @click.stop="toggleStar(dash.slug)">
                   <i class="pi pi-star-fill text-warning" />
                 </button>
               </div>
               <p class="text-sm text-base-content/60">
-                {{ dash.description || "No description" }}
+                {{ dash.description || 'No description' }}
               </p>
               <div class="text-xs text-base-content/40 mt-2">
                 Updated {{ formatDate(dash.updated_at) }}
@@ -51,44 +44,28 @@
 
       <!-- Rest as table -->
       <div v-if="unstarred.length > 0">
-        <h2 v-if="starred.length > 0" class="text-lg font-semibold mb-3">
-          All Dashboards
-        </h2>
-        <DataTable
-          :value="unstarred"
-          stripedRows
-          class="rounded-lg overflow-hidden"
-        >
+        <h2 v-if="starred.length > 0" class="text-lg font-semibold mb-3">All Dashboards</h2>
+        <DataTable :value="unstarred" stripedRows class="rounded-lg overflow-hidden">
           <Column header="Name">
             <template #body="{ data }">
-              <RouterLink
-                :to="`/dashboards/${data.slug}`"
-                class="link font-medium"
-              >
+              <RouterLink :to="`/dashboards/${data.slug}`" class="link font-medium">
                 {{ data.title }}
               </RouterLink>
             </template>
           </Column>
           <Column field="description" header="Description">
             <template #body="{ data }">
-              <span class="text-base-content/60">{{
-                data.description || "—"
-              }}</span>
+              <span class="text-base-content/60">{{ data.description || '—' }}</span>
             </template>
           </Column>
           <Column header="Updated" style="width: 140px">
             <template #body="{ data }">
-              <span class="text-sm text-base-content/50">{{
-                formatDate(data.updated_at)
-              }}</span>
+              <span class="text-sm text-base-content/50">{{ formatDate(data.updated_at) }}</span>
             </template>
           </Column>
           <Column header="" style="width: 60px">
             <template #body="{ data }">
-              <button
-                class="btn btn-ghost btn-sm"
-                @click="toggleStar(data.slug)"
-              >
+              <button class="btn btn-ghost btn-sm" @click="toggleStar(data.slug)">
                 <i class="pi pi-star" />
               </button>
             </template>
@@ -96,10 +73,7 @@
         </DataTable>
       </div>
 
-      <div
-        v-if="filtered.length === 0"
-        class="text-center p-12 text-base-content/60"
-      >
+      <div v-if="filtered.length === 0" class="text-center p-12 text-base-content/60">
         <template v-if="search">No dashboards matching "{{ search }}"</template>
         <template v-else>
           No dashboards yet.
@@ -111,36 +85,34 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { useDashboardStore } from "@/stores/dashboards";
-import { dashboardsApi } from "@/api/dashboards";
-import InputText from "primevue/inputtext";
-import ProgressSpinner from "primevue/progressspinner";
-import DataTable from "primevue/datatable";
-import Column from "primevue/column";
+import { computed, onMounted, ref } from 'vue'
+import { useDashboardStore } from '@/stores/dashboards'
+import { dashboardsApi } from '@/api/dashboards'
+import InputText from 'primevue/inputtext'
+import ProgressSpinner from 'primevue/progressspinner'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
 
-const store = useDashboardStore();
-const search = ref("");
+const store = useDashboardStore()
+const search = ref('')
 
-const loading = computed(() => store.loading);
+const loading = computed(() => store.loading)
 
 const filtered = computed(() =>
-  store.items.filter((d) =>
-    d.title.toLowerCase().includes(search.value.toLowerCase()),
-  ),
-);
+  store.items.filter((d) => d.title.toLowerCase().includes(search.value.toLowerCase())),
+)
 
-const starred = computed(() => filtered.value.filter((d) => d.is_starred));
-const unstarred = computed(() => filtered.value.filter((d) => !d.is_starred));
+const starred = computed(() => filtered.value.filter((d) => d.is_starred))
+const unstarred = computed(() => filtered.value.filter((d) => !d.is_starred))
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString()
 }
 
 async function toggleStar(slug: string) {
-  await dashboardsApi.toggleStar(slug);
-  await store.fetchAll();
+  await dashboardsApi.toggleStar(slug)
+  await store.fetchAll()
 }
 
-onMounted(() => store.fetchAll());
+onMounted(() => store.fetchAll())
 </script>

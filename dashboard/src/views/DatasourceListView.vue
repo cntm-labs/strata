@@ -11,18 +11,11 @@
       <ProgressSpinner />
     </div>
 
-    <DataTable
-      v-else
-      :value="store.items"
-      stripedRows
-      class="rounded-lg overflow-hidden"
-    >
+    <DataTable v-else :value="store.items" stripedRows class="rounded-lg overflow-hidden">
       <Column field="name" header="Name" />
       <Column field="type" header="Type">
         <template #body="{ data }">
-          <span class="badge" :class="typeBadgeClass(data.type)">{{
-            data.type
-          }}</span>
+          <span class="badge" :class="typeBadgeClass(data.type)">{{ data.type }}</span>
         </template>
       </Column>
       <Column field="url" header="URL" />
@@ -34,18 +27,11 @@
       <Column header="Actions" style="width: 200px">
         <template #body="{ data }">
           <div class="flex gap-2">
-            <button class="btn btn-sm btn-ghost" @click="testDs(data.id)">
-              Test
-            </button>
-            <RouterLink
-              :to="`/datasources/${data.id}`"
-              class="btn btn-sm btn-ghost"
+            <button class="btn btn-sm btn-ghost" @click="testDs(data.id)">Test</button>
+            <RouterLink :to="`/datasources/${data.id}`" class="btn btn-sm btn-ghost"
               >Edit</RouterLink
             >
-            <button
-              class="btn btn-sm btn-ghost text-error"
-              @click="removeDs(data.id)"
-            >
+            <button class="btn btn-sm btn-ghost text-error" @click="removeDs(data.id)">
               Delete
             </button>
           </div>
@@ -64,36 +50,36 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from "vue";
-import { useDatasourceStore } from "@/stores/datasources";
-import { datasourcesApi } from "@/api/datasources";
-import DataTable from "primevue/datatable";
-import Column from "primevue/column";
-import ProgressSpinner from "primevue/progressspinner";
+import { onMounted } from 'vue'
+import { useDatasourceStore } from '@/stores/datasources'
+import { datasourcesApi } from '@/api/datasources'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import ProgressSpinner from 'primevue/progressspinner'
 
-const store = useDatasourceStore();
+const store = useDatasourceStore()
 
 function typeBadgeClass(type: string) {
   return (
     {
-      prometheus: "badge-primary",
-      loki: "badge-secondary",
-      postgresql: "badge-accent",
-    }[type] || "badge-ghost"
-  );
+      prometheus: 'badge-primary',
+      loki: 'badge-secondary',
+      postgresql: 'badge-accent',
+    }[type] || 'badge-ghost'
+  )
 }
 
 async function testDs(id: string) {
-  const result = await datasourcesApi.test(id);
-  alert(result.success ? "Connection successful!" : "Connection failed");
+  const result = await datasourcesApi.test(id)
+  alert(result.success ? 'Connection successful!' : 'Connection failed')
 }
 
 async function removeDs(id: string) {
-  if (confirm("Delete this datasource?")) {
-    await datasourcesApi.remove(id);
-    await store.fetchAll();
+  if (confirm('Delete this datasource?')) {
+    await datasourcesApi.remove(id)
+    await store.fetchAll()
   }
 }
 
-onMounted(() => store.fetchAll());
+onMounted(() => store.fetchAll())
 </script>

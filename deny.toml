@@ -1,9 +1,12 @@
 [graph]
-all-features = true
+all-features = false
 
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
+# rsa timing sidechannel via sqlx-mysql (transitive dep we don't use)
+# sqlx-macros-core unconditionally pulls sqlx-mysql. No upstream fix.
+ignore = ["RUSTSEC-2023-0071"]
 
 [licenses]
 private = { ignore = true }

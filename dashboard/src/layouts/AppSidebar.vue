@@ -16,11 +16,11 @@
 
 <script setup lang="ts">
 const navItems = [
-  { path: "/dashboards", label: "Dashboards", icon: "pi pi-th-large" },
-  { path: "/explore", label: "Explore", icon: "pi pi-search" },
-  { path: "/alerts", label: "Alerts", icon: "pi pi-bell" },
-  { path: "/datasources", label: "Data Sources", icon: "pi pi-database" },
-  { path: "/templates", label: "Templates", icon: "pi pi-copy" },
-  { path: "/settings", label: "Settings", icon: "pi pi-cog" },
-];
+  { path: '/dashboards', label: 'Dashboards', icon: 'pi pi-th-large' },
+  { path: '/explore', label: 'Explore', icon: 'pi pi-search' },
+  { path: '/alerts', label: 'Alerts', icon: 'pi pi-bell' },
+  { path: '/datasources', label: 'Data Sources', icon: 'pi pi-database' },
+  { path: '/templates', label: 'Templates', icon: 'pi pi-copy' },
+  { path: '/settings', label: 'Settings', icon: 'pi pi-cog' },
+]
 </script>

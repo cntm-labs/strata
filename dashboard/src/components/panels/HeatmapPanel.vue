@@ -3,47 +3,38 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
-import VChart from "vue-echarts";
-import { use } from "echarts/core";
-import { HeatmapChart } from "echarts/charts";
-import {
-  GridComponent,
-  VisualMapComponent,
-  TooltipComponent,
-} from "echarts/components";
-import { CanvasRenderer } from "echarts/renderers";
+import { computed } from 'vue'
+import VChart from 'vue-echarts'
+import { use } from 'echarts/core'
+import { HeatmapChart } from 'echarts/charts'
+import { GridComponent, VisualMapComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import type { PrometheusResponse, PrometheusMetric } from '@/types'
 
-use([
-  HeatmapChart,
-  GridComponent,
-  VisualMapComponent,
-  TooltipComponent,
-  CanvasRenderer,
-]);
+use([HeatmapChart, GridComponent, VisualMapComponent, TooltipComponent, CanvasRenderer])
 
-const props = defineProps<{ data: unknown; config: Record<string, unknown> }>();
+const props = defineProps<{ data: unknown; config: Record<string, unknown> }>()
 
 const chartOption = computed(() => {
-  const result = (props.data as any)?.data?.result || [];
-  const heatmapData: [number, number, number][] = [];
+  const result = (props.data as PrometheusResponse)?.data?.result || []
+  const heatmapData: [number, number, number][] = []
 
-  result.forEach((r: any, seriesIdx: number) => {
-    const values = r.values || [];
+  result.forEach((r: PrometheusMetric, seriesIdx: number) => {
+    const values = r.values || []
     values.forEach((v: [number, string], timeIdx: number) => {
-      heatmapData.push([timeIdx, seriesIdx, parseFloat(v[1])]);
-    });
-  });
+      heatmapData.push([timeIdx, seriesIdx, parseFloat(v[1])])
+    })
+  })
 
   return {
     tooltip: {},
-    xAxis: { type: "category" },
+    xAxis: { type: 'category' },
     yAxis: {
-      type: "category",
-      data: result.map((_: any, i: number) => `Series ${i + 1}`),
+      type: 'category',
+      data: result.map((_: PrometheusMetric, i: number) => `Series ${i + 1}`),
     },
     visualMap: { min: 0, max: 100, calculable: true },
-    series: [{ type: "heatmap", data: heatmapData }],
-  };
-});
+    series: [{ type: 'heatmap', data: heatmapData }],
+  }
+})
 </script>

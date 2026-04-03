@@ -51,53 +51,47 @@
       No panels. Click "Add Panel" to get started.
     </div>
 
-    <PanelEditor
-      v-model:visible="editorVisible"
-      :panel="editingPanel"
-      @save="onPanelSave"
-    />
+    <PanelEditor v-model:visible="editorVisible" :panel="editingPanel" @save="onPanelSave" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, reactive } from "vue";
-import { useRoute } from "vue-router";
-import { dashboardsApi } from "@/api/dashboards";
-import { datasourcesApi } from "@/api/datasources";
-import PanelRenderer from "@/components/panels/PanelRenderer.vue";
-import PanelEditor from "@/components/PanelEditor.vue";
-import { GridLayout, GridItem } from "grid-layout-plus";
-import type { Dashboard, Panel, PanelType } from "@/types";
+import { ref, onMounted, computed, reactive } from 'vue'
+import { useRoute } from 'vue-router'
+import { dashboardsApi } from '@/api/dashboards'
+import { datasourcesApi } from '@/api/datasources'
+import PanelRenderer from '@/components/panels/PanelRenderer.vue'
+import PanelEditor from '@/components/PanelEditor.vue'
+import { GridItem } from 'grid-layout-plus'
+import type { Dashboard, Panel, PanelType } from '@/types'
 
-const route = useRoute();
-const slug = computed(() => route.params.slug as string);
-const dashboard = ref<Dashboard | null>(null);
-const panels = ref<Panel[]>([]);
-const panelData = reactive<Record<string, unknown>>({});
+const route = useRoute()
+const slug = computed(() => route.params.slug as string)
+const dashboard = ref<Dashboard | null>(null)
+const panels = ref<Panel[]>([])
+const panelData = reactive<Record<string, unknown>>({})
 
-const editorVisible = ref(false);
-const editingPanel = ref<Panel | undefined>(undefined);
+const editorVisible = ref(false)
+const editingPanel = ref<Panel | undefined>(undefined)
 
-const gridLayout = computed(() =>
-  panels.value.map((p) => ({ ...p.position, i: p.id })),
-);
+const gridLayout = computed(() => panels.value.map((p) => ({ ...p.position, i: p.id })))
 
 function addPanel() {
-  editingPanel.value = undefined;
-  editorVisible.value = true;
+  editingPanel.value = undefined
+  editorVisible.value = true
 }
 
 function editPanel(panel: Panel) {
-  editingPanel.value = panel;
-  editorVisible.value = true;
+  editingPanel.value = panel
+  editorVisible.value = true
 }
 
 async function onPanelSave(data: {
-  title: string;
-  type: string;
-  datasource_id: string;
-  query: string;
-  position: { x: number; y: number; w: number; h: number };
+  title: string
+  type: string
+  datasource_id: string
+  query: string
+  position: { x: number; y: number; w: number; h: number }
 }) {
   const panelPayload = {
     title: data.title,
@@ -105,21 +99,21 @@ async function onPanelSave(data: {
     datasource_id: data.datasource_id,
     query: data.query,
     config: {},
-    position: { ...data.position, i: "" },
-  };
+    position: { ...data.position, i: '' },
+  }
 
   if (editingPanel.value) {
-    await dashboardsApi.updatePanel(editingPanel.value.id, panelPayload);
+    await dashboardsApi.updatePanel(editingPanel.value.id, panelPayload)
   } else {
-    await dashboardsApi.addPanel(slug.value, panelPayload);
+    await dashboardsApi.addPanel(slug.value, panelPayload)
   }
-  await reload();
+  await reload()
 }
 
 async function removePanel(id: string) {
-  if (confirm("Remove this panel?")) {
-    await dashboardsApi.removePanel(id);
-    await reload();
+  if (confirm('Remove this panel?')) {
+    await dashboardsApi.removePanel(id)
+    await reload()
   }
 }
 
@@ -127,40 +121,40 @@ async function onLayoutUpdated(
   layout: Array<{ i: string; x: number; y: number; w: number; h: number }>,
 ) {
   for (const item of layout) {
-    const panel = panels.value.find((p) => p.id === item.i);
-    if (!panel) continue;
+    const panel = panels.value.find((p) => p.id === item.i)
+    if (!panel) continue
     const posChanged =
       panel.position.x !== item.x ||
       panel.position.y !== item.y ||
       panel.position.w !== item.w ||
-      panel.position.h !== item.h;
+      panel.position.h !== item.h
     if (posChanged) {
       await dashboardsApi.updatePanel(panel.id, {
         position: { x: item.x, y: item.y, w: item.w, h: item.h, i: item.i },
-      });
+      })
     }
   }
 }
 
 async function reload() {
-  const p = await dashboardsApi.listPanels(slug.value);
-  panels.value = p;
+  const p = await dashboardsApi.listPanels(slug.value)
+  panels.value = p
   for (const panel of p) {
     if (panel.datasource_id) {
-      const now = Math.floor(Date.now() / 1000);
+      const now = Math.floor(Date.now() / 1000)
       panelData[panel.id] = await datasourcesApi.query(panel.datasource_id, {
         query: panel.query,
         start: (now - 3600).toString(),
         end: now.toString(),
-        step: "15",
-      });
+        step: '15',
+      })
     }
   }
 }
 
 onMounted(async () => {
-  const dash = await dashboardsApi.get(slug.value);
-  dashboard.value = dash;
-  await reload();
-});
+  const dash = await dashboardsApi.get(slug.value)
+  dashboard.value = dash
+  await reload()
+})
 </script>

@@ -39,53 +39,53 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from "vue";
-import { dashboardsApi } from "@/api/dashboards";
-import InputText from "primevue/inputtext";
-import Select from "primevue/select";
-import type { Dashboard } from "@/types";
+import { ref, reactive, onMounted, watch } from 'vue'
+import { dashboardsApi } from '@/api/dashboards'
+import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
+import type { Dashboard } from '@/types'
 
-const dashboards = ref<Dashboard[]>([]);
-const saved = ref(false);
+const dashboards = ref<Dashboard[]>([])
+const saved = ref(false)
 
 const themeOptions = [
-  { label: "System", value: "system" },
-  { label: "Light", value: "light" },
-  { label: "Dark", value: "dark" },
-];
+  { label: 'System', value: 'system' },
+  { label: 'Light', value: 'light' },
+  { label: 'Dark', value: 'dark' },
+]
 
 const form = reactive({
-  theme: "system",
+  theme: 'system',
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  default_dashboard_id: "",
-});
+  default_dashboard_id: '',
+})
 
 // Apply theme to document
 watch(
   () => form.theme,
   (theme) => {
-    if (theme === "system") {
-      document.documentElement.removeAttribute("data-theme");
+    if (theme === 'system') {
+      document.documentElement.removeAttribute('data-theme')
     } else {
-      document.documentElement.setAttribute("data-theme", theme);
+      document.documentElement.setAttribute('data-theme', theme)
     }
   },
-);
+)
 
 function save() {
   // Save to localStorage for now (backend user preferences requires auth)
-  localStorage.setItem("strata-settings", JSON.stringify(form));
-  saved.value = true;
+  localStorage.setItem('strata-settings', JSON.stringify(form))
+  saved.value = true
   setTimeout(() => {
-    saved.value = false;
-  }, 2000);
+    saved.value = false
+  }, 2000)
 }
 
 onMounted(async () => {
-  dashboards.value = await dashboardsApi.list();
-  const stored = localStorage.getItem("strata-settings");
+  dashboards.value = await dashboardsApi.list()
+  const stored = localStorage.getItem('strata-settings')
   if (stored) {
-    Object.assign(form, JSON.parse(stored));
+    Object.assign(form, JSON.parse(stored))
   }
-});
+})
 </script>
