@@ -34,7 +34,7 @@ cd dashboard
 npm install                      # Install dependencies
 npm run dev                      # Dev server (Vite)
 npm run build                    # Production build
-npm run typecheck                # TypeScript check
+npm run type-check               # TypeScript check
 npm run lint                     # ESLint
 npm run format                   # Prettier
 ```
