@@ -17,7 +17,6 @@ pub enum AppError {
     Request(#[from] reqwest::Error),
 
     #[error("Internal error: {0}")]
-    #[allow(dead_code)]
     Internal(String),
 }
 
@@ -45,6 +44,12 @@ impl IntoResponse for AppError {
         };
 
         (status, axum::Json(body)).into_response()
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(e: serde_json::Error) -> Self {
+        AppError::Internal(e.to_string())
     }
 }
 

@@ -36,10 +36,10 @@ pub async fn proxy_query(
             let client = PrometheusClient::new(&ds.url);
             if let (Some(start), Some(end), Some(step)) = (&input.start, &input.end, &input.step) {
                 let resp = client.query_range(&input.query, start, end, step).await?;
-                serde_json::to_value(resp).unwrap()
+                serde_json::to_value(resp)?
             } else {
                 let resp = client.query(&input.query, None, None).await?;
-                serde_json::to_value(resp).unwrap()
+                serde_json::to_value(resp)?
             }
         }
         "loki" => {
@@ -48,15 +48,15 @@ pub async fn proxy_query(
                 let resp = client
                     .query_range(&input.query, start, end, input.limit)
                     .await?;
-                serde_json::to_value(resp).unwrap()
+                serde_json::to_value(resp)?
             } else {
                 let resp = client.query(&input.query, input.limit).await?;
-                serde_json::to_value(resp).unwrap()
+                serde_json::to_value(resp)?
             }
         }
         "postgresql" => {
             let rows = postgresql::execute_query(&ds.url, &input.query).await?;
-            serde_json::to_value(rows).unwrap()
+            serde_json::to_value(rows)?
         }
         other => {
             return Err(AppError::BadRequest(format!(

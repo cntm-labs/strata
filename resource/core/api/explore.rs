@@ -70,10 +70,9 @@ async fn explore_query(
         "prometheus" => {
             let client = PrometheusClient::new(&ds.url);
             if let (Some(start), Some(end), Some(step)) = (&input.start, &input.end, &input.step) {
-                serde_json::to_value(client.query_range(&input.query, start, end, step).await?)
-                    .unwrap()
+                serde_json::to_value(client.query_range(&input.query, start, end, step).await?)?
             } else {
-                serde_json::to_value(client.query(&input.query, None, None).await?).unwrap()
+                serde_json::to_value(client.query(&input.query, None, None).await?)?
             }
         }
         "loki" => {
@@ -83,15 +82,14 @@ async fn explore_query(
                     client
                         .query_range(&input.query, start, end, input.limit)
                         .await?,
-                )
-                .unwrap()
+                )?
             } else {
-                serde_json::to_value(client.query(&input.query, input.limit).await?).unwrap()
+                serde_json::to_value(client.query(&input.query, input.limit).await?)?
             }
         }
         "postgresql" => {
             let rows = crate::datasource::postgresql::execute_query(&ds.url, &input.query).await?;
-            serde_json::to_value(rows).unwrap()
+            serde_json::to_value(rows)?
         }
         other => {
             return Err(AppError::BadRequest(format!(
