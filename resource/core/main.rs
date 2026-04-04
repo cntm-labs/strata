@@ -86,6 +86,21 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn unknown_route_returns_fallback(pool: sqlx::PgPool) {
+        let app = build_router(test_state(pool));
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Fallback serves static files; non-existent returns 404 or static fallback
+        assert!(resp.status() == StatusCode::OK || resp.status() == StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test]
     async fn health_returns_ok(pool: sqlx::PgPool) {
         let app = build_router(test_state(pool));
         let resp = app

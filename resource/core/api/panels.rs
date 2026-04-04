@@ -310,7 +310,7 @@ mod tests {
         let app = test_app(pool.clone());
         let resp = app
             .oneshot(
-                Request::delete(&format!("/panels/{}", created.id))
+                Request::delete(format!("/panels/{}", created.id))
                     .body(Body::empty())
                     .unwrap(),
             )

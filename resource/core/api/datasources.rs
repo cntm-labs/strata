@@ -221,7 +221,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/{}", created.id))
+                Request::get(format!("/{}", created.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -238,7 +238,7 @@ mod tests {
         let fake_id = Uuid::new_v4();
         let resp = app
             .oneshot(
-                Request::get(&format!("/{}", fake_id))
+                Request::get(format!("/{}", fake_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -289,7 +289,7 @@ mod tests {
         let app = test_app(pool.clone());
         let resp = app
             .oneshot(
-                Request::delete(&format!("/{}", created.id))
+                Request::delete(format!("/{}", created.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -300,7 +300,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/{}", created.id))
+                Request::get(format!("/{}", created.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -335,7 +335,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::post(&format!("/{}/test", ds.id))
+                Request::post(format!("/{}/test", ds.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -360,7 +360,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::post(&format!("/{}/test", ds.id))
+                Request::post(format!("/{}/test", ds.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -377,7 +377,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::post(&format!("/{}/test", ds.id))
+                Request::post(format!("/{}/test", ds.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -393,7 +393,7 @@ mod tests {
         let fake_id = Uuid::new_v4();
         let resp = app
             .oneshot(
-                Request::post(&format!("/{}/test", fake_id))
+                Request::post(format!("/{}/test", fake_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -416,7 +416,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::post(&format!("/{}/test", ds.id))
+                Request::post(format!("/{}/test", ds.id))
                     .body(Body::empty())
                     .unwrap(),
             )

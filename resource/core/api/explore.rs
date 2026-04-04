@@ -432,7 +432,7 @@ mod tests {
         let app = test_app(pool.clone());
         let resp = app
             .oneshot(
-                Request::get(&format!("/history?datasource_id={}&limit=5", ds_id))
+                Request::get(format!("/history?datasource_id={}&limit=5", ds_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -445,7 +445,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/history?datasource_id={}", Uuid::new_v4()))
+                Request::get(format!("/history?datasource_id={}", Uuid::new_v4()))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -472,7 +472,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/labels/{}", ds_id))
+                Request::get(format!("/labels/{}", ds_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -500,7 +500,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/labels/{}", ds_id))
+                Request::get(format!("/labels/{}", ds_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -516,7 +516,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/labels/{}", ds_id))
+                Request::get(format!("/labels/{}", ds_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -532,7 +532,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/labels/{}", Uuid::new_v4()))
+                Request::get(format!("/labels/{}", Uuid::new_v4()))
                     .body(Body::empty())
                     .unwrap(),
             )

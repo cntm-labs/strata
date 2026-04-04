@@ -284,7 +284,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/rules/{}", created.id))
+                Request::get(format!("/rules/{}", created.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -301,7 +301,7 @@ mod tests {
         let fake_id = Uuid::new_v4();
         let resp = app
             .oneshot(
-                Request::get(&format!("/rules/{}", fake_id))
+                Request::get(format!("/rules/{}", fake_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -358,7 +358,7 @@ mod tests {
         let app = test_app(pool.clone());
         let resp = app
             .oneshot(
-                Request::delete(&format!("/rules/{}", created.id))
+                Request::delete(format!("/rules/{}", created.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -369,7 +369,7 @@ mod tests {
         let app = test_app(pool);
         let resp = app
             .oneshot(
-                Request::get(&format!("/rules/{}", created.id))
+                Request::get(format!("/rules/{}", created.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -409,7 +409,7 @@ mod tests {
         let app = test_app(pool.clone());
         let resp = app
             .oneshot(
-                Request::get(&format!("/events?rule_id={}&limit=10", rule.id))
+                Request::get(format!("/events?rule_id={}&limit=10", rule.id))
                     .body(Body::empty())
                     .unwrap(),
             )
