@@ -373,6 +373,28 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn explore_postgresql(pool: sqlx::PgPool) {
+        dotenvy::dotenv().ok();
+        let pg_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string());
+
+        let ds_id = seed_datasource(&pool, "postgresql", &pg_url).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "/query",
+                serde_json::json!({
+                    "datasource_id": ds_id,
+                    "query": "SELECT 1 AS value"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
     async fn explore_saves_history(pool: sqlx::PgPool) {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))

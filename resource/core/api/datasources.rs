@@ -403,6 +403,28 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn test_connection_postgresql(pool: sqlx::PgPool) {
+        // Use real DATABASE_URL so PgPool::connect succeeds
+        dotenvy::dotenv().ok();
+        let pg_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string());
+
+        let ds = create_ds(&pool, "PG", "postgresql", &pg_url).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/{}/test", ds.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let result: serde_json::Value = body_json(resp).await;
+        assert_eq!(result["success"], true);
+    }
+
+    #[sqlx::test]
     async fn test_connection_prometheus_unhealthy(pool: sqlx::PgPool) {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))

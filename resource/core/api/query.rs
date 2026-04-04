@@ -212,6 +212,26 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn proxy_postgresql(pool: sqlx::PgPool) {
+        dotenvy::dotenv().ok();
+        let pg_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string());
+
+        let ds_id = seed_ds(&pool, "postgresql", &pg_url).await;
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                &format!("/{}/query", ds_id),
+                serde_json::json!({
+                    "query": "SELECT 1 AS value"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
     async fn proxy_unsupported_type(pool: sqlx::PgPool) {
         let ds_id = seed_ds(&pool, "redis", "http://redis:6379").await;
         let app = test_app(pool);
