@@ -54,8 +54,7 @@ mod tests {
 
     fn test_db_url() -> String {
         dotenvy::dotenv().ok();
-        std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string())
+        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set")
     }
 
     #[tokio::test]

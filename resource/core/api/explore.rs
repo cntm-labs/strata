@@ -77,15 +77,14 @@ async fn explore_query(
         }
         "loki" => {
             let client = LokiClient::new(&ds.url);
-            if let (Some(start), Some(end)) = (&input.start, &input.end) {
-                serde_json::to_value(
-                    client
-                        .query_range(&input.query, start, end, input.limit)
-                        .await?,
-                )?
+            let resp = if let (Some(start), Some(end)) = (&input.start, &input.end) {
+                client
+                    .query_range(&input.query, start, end, input.limit)
+                    .await?
             } else {
-                serde_json::to_value(client.query(&input.query, input.limit).await?)?
-            }
+                client.query(&input.query, input.limit).await?
+            };
+            serde_json::to_value(resp)?
         }
         "postgresql" => {
             let rows = crate::datasource::postgresql::execute_query(&ds.url, &input.query).await?;
@@ -375,8 +374,7 @@ mod tests {
     #[sqlx::test]
     async fn explore_postgresql(pool: sqlx::PgPool) {
         dotenvy::dotenv().ok();
-        let pg_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string());
+        let pg_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
         let ds_id = seed_datasource(&pool, "postgresql", &pg_url).await;
 

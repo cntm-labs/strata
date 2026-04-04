@@ -406,8 +406,7 @@ mod tests {
     async fn test_connection_postgresql(pool: sqlx::PgPool) {
         // Use real DATABASE_URL so PgPool::connect succeeds
         dotenvy::dotenv().ok();
-        let pg_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string());
+        let pg_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
         let ds = create_ds(&pool, "PG", "postgresql", &pg_url).await;
 

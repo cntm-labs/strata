@@ -214,8 +214,7 @@ mod tests {
     #[sqlx::test]
     async fn proxy_postgresql(pool: sqlx::PgPool) {
         dotenvy::dotenv().ok();
-        let pg_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string());
+        let pg_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
         let ds_id = seed_ds(&pool, "postgresql", &pg_url).await;
         let app = test_app(pool);
