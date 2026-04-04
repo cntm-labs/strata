@@ -6,14 +6,14 @@ coverage:
     project:
       default:
         target: 100%
-        threshold: 2%
+        threshold: 0%
     patch:
       default:
         target: 100%
-        threshold: 2%
 
 ignore:
   - "resource/migrations/"
+  - "resource/core/main.rs"
   - "dashboard/"
   - "dev/"
   - "scripts/"

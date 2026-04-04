@@ -90,12 +90,15 @@ mod tests {
     async fn execute_various_types() {
         let results = execute_query(
             &test_db_url(),
-            "SELECT 42::int4 AS int_val, 3.14::float8 AS float_val, true AS bool_val, 'hello'::text AS text_val",
+            "SELECT 42::int4 AS int4_val, 9999999999::int8 AS int8_val, 3.14::float4 AS float4_val, 2.718281828::float8 AS float8_val, true AS bool_val, 'hello'::text AS text_val",
         )
         .await
         .unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0]["int_val"], 42);
+        assert_eq!(results[0]["int4_val"], 42);
+        assert_eq!(results[0]["int8_val"], 9_999_999_999_i64);
+        assert!(results[0]["float4_val"].as_f64().unwrap() > 3.0);
+        assert!(results[0]["float8_val"].as_f64().unwrap() > 2.7);
         assert_eq!(results[0]["bool_val"], true);
         assert_eq!(results[0]["text_val"], "hello");
     }
