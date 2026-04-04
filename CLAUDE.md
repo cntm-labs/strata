@@ -34,7 +34,7 @@ cd dashboard
 npm install                      # Install dependencies
 npm run dev                      # Dev server (Vite)
 npm run build                    # Production build
-npm run typecheck                # TypeScript check
+npm run type-check               # TypeScript check
 npm run lint                     # ESLint
 npm run format                   # Prettier
 ```
@@ -71,6 +71,33 @@ strata/
 ├── Dockerfile
 └── docker-compose.yml
 ```
+
+## Quality Commands
+
+### Rust
+```sh
+cargo lint                       # Clippy with -D warnings (alias)
+cargo deny check                 # License + advisory check
+cargo llvm-cov --workspace       # Code coverage
+```
+
+### Frontend
+```sh
+cd dashboard
+npm run lint                     # ESLint
+npm run format                   # Prettier
+```
+
+### Pre-commit
+```sh
+./scripts/setup-hooks.sh         # Install git hooks (one-time)
+```
+
+## Lint Policy
+- `unsafe_code` = forbid (no unsafe Rust)
+- `dead_code` = deny (remove unused code)
+- `unused_imports` = deny (clean imports)
+- `clippy::all` = warn (standard clippy lints)
 
 ## Key Design Decisions
 - **No Grafana dependency** — full control over UI/UX and theming

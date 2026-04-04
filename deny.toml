@@ -1,0 +1,34 @@
+[graph]
+all-features = false
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# rsa timing sidechannel via sqlx-mysql (transitive dep we don't use)
+# sqlx-macros-core unconditionally pulls sqlx-mysql. No upstream fix.
+ignore = ["RUSTSEC-2023-0071"]
+
+[licenses]
+private = { ignore = true }
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "0BSD",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "simplest-path"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

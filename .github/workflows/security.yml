@@ -1,0 +1,33 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # RUSTSEC-2023-0071: rsa timing sidechannel via sqlx-mysql (transitive dep)
+      # Strata only uses PostgreSQL. sqlx-macros-core unconditionally pulls sqlx-mysql.
+      # No upstream fix available. Remove --ignore when sqlx fixes this.
+      - run: cargo audit --ignore RUSTSEC-2023-0071
+
+  cargo-deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

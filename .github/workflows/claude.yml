@@ -1,0 +1,63 @@
+name: Claude Analysis
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  analyze:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@claude') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@2f6ae6dec5e61533cbcb273c336448960b2c6a06 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are reviewing a PR for Strata — an open-source observability dashboard
+            (Grafana alternative) with a Rust/Axum backend and Vue 3 frontend.
+
+            Analyze this PR and provide a structured review as a PR comment:
+
+            ## Strata PR Analysis
+
+            ### Critical (must fix before merge)
+            - Security issues (SQL injection, credential leaks, XSS)
+            - Breaking API changes
+            - Data exposure in logs or responses
+
+            ### Warnings (should fix)
+            - Performance regressions (N+1 queries, missing indexes)
+            - Missing error handling
+            - Dead code or unused imports
+
+            ### Positive
+            - Good patterns worth noting
+
+            ### Summary
+            | Check | Status |
+            |-------|--------|
+            | Security | pass/warn/fail |
+            | Tests | pass/warn/fail |
+            | Performance | pass/warn/fail |
+            | Code Quality | pass/warn/fail |
+
+            Be concise. Only flag real issues, not style preferences.

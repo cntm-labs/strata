@@ -1,0 +1,38 @@
+#!/bin/sh
+# Strata pre-commit hook
+# Install: ./scripts/setup-hooks.sh
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# 1. Rust formatting
+echo "  [1/3] cargo fmt..."
+cargo fmt --all -- --check
+if [ $? -ne 0 ]; then
+    echo "Formatting check failed. Run: cargo fmt --all"
+    exit 1
+fi
+
+# 2. Clippy lints
+echo "  [2/3] cargo clippy..."
+cargo clippy --workspace -- -D warnings 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "Clippy found warnings. Fix them before committing."
+    exit 1
+fi
+
+# 3. Dashboard checks (if dashboard files changed)
+DASHBOARD_CHANGED=$(git diff --cached --name-only | grep "^dashboard/" || true)
+if [ -n "$DASHBOARD_CHANGED" ]; then
+    echo "  [3/3] Prettier + TypeScript check..."
+    (cd dashboard && npx prettier --check "src/**/*.{ts,vue}" && npx vue-tsc --noEmit)
+    if [ $? -ne 0 ]; then
+        echo "Dashboard checks failed."
+        exit 1
+    fi
+else
+    echo "  [3/3] Dashboard checks... (skipped, no changes)"
+fi
+
+echo "All pre-commit checks passed!"
