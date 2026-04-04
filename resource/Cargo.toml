@@ -23,5 +23,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 thiserror = "2"
 
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+wiremock = "0.6"
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "migrate"] }
+
 [lints]
 workspace = true

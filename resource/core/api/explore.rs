@@ -170,3 +170,374 @@ async fn label_values(
 
     Ok(Json(result))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_app(db: sqlx::PgPool) -> axum::Router {
+        let state = crate::AppState {
+            db,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+            },
+        };
+        explore_routes().with_state(state)
+    }
+
+    async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    fn json_request(uri: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap()
+    }
+
+    async fn seed_datasource(pool: &sqlx::PgPool, ds_type: &str, url: &str) -> Uuid {
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url) VALUES ($1, $2, $3) RETURNING id",
+        )
+        .bind(format!("Test {}", ds_type))
+        .bind(ds_type)
+        .bind(url)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn explore_prometheus_instant(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/query"))
+            .and(query_param("query", "up"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success",
+                "data": {"resultType": "vector", "result": []}
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "prometheus", &mock.uri()).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "/query",
+                serde_json::json!({
+                    "datasource_id": ds_id,
+                    "query": "up"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
+    async fn explore_prometheus_range(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/query_range"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success",
+                "data": {"resultType": "matrix", "result": []}
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "prometheus", &mock.uri()).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "/query",
+                serde_json::json!({
+                    "datasource_id": ds_id,
+                    "query": "up",
+                    "start": "1000",
+                    "end": "2000",
+                    "step": "15"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
+    async fn explore_loki_instant(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/loki/api/v1/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success",
+                "data": {"resultType": "streams", "result": []}
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "loki", &mock.uri()).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "/query",
+                serde_json::json!({
+                    "datasource_id": ds_id,
+                    "query": "{job=\"app\"}"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
+    async fn explore_loki_range(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/loki/api/v1/query_range"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success",
+                "data": {}
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "loki", &mock.uri()).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "/query",
+                serde_json::json!({
+                    "datasource_id": ds_id,
+                    "query": "{job=\"app\"}",
+                    "start": "1000",
+                    "end": "2000",
+                    "limit": 50
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
+    async fn explore_unsupported_type(pool: sqlx::PgPool) {
+        let ds_id = seed_datasource(&pool, "redis", "http://redis:6379").await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "/query",
+                serde_json::json!({
+                    "datasource_id": ds_id,
+                    "query": "KEYS *"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[sqlx::test]
+    async fn explore_datasource_not_found(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "/query",
+                serde_json::json!({
+                    "datasource_id": Uuid::new_v4(),
+                    "query": "up"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test]
+    async fn explore_saves_history(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success", "data": {}
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "prometheus", &mock.uri()).await;
+
+        let app = test_app(pool.clone());
+        app.oneshot(json_request(
+            "/query",
+            serde_json::json!({
+                "datasource_id": ds_id, "query": "up"
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(Request::get("/history").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let items: Vec<ExploreHistory> = body_json(resp).await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].query, "up");
+        assert_eq!(items[0].query_type, "prometheus");
+    }
+
+    #[sqlx::test]
+    async fn history_with_datasource_filter(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success", "data": {}
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "prometheus", &mock.uri()).await;
+
+        let app = test_app(pool.clone());
+        app.oneshot(json_request(
+            "/query",
+            serde_json::json!({
+                "datasource_id": ds_id, "query": "up"
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/history?datasource_id={}&limit=5", ds_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let items: Vec<ExploreHistory> = body_json(resp).await;
+        assert_eq!(items.len(), 1);
+
+        // Different datasource — empty
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/history?datasource_id={}", Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let items: Vec<ExploreHistory> = body_json(resp).await;
+        assert!(items.is_empty());
+    }
+
+    #[sqlx::test]
+    async fn label_values_prometheus(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/labels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success",
+                "data": ["__name__", "job", "instance"]
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "prometheus", &mock.uri()).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/labels/{}", ds_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let result: serde_json::Value = body_json(resp).await;
+        assert_eq!(result["data"].as_array().unwrap().len(), 3);
+    }
+
+    #[sqlx::test]
+    async fn label_values_loki(pool: sqlx::PgPool) {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/loki/api/v1/labels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success",
+                "data": ["job"]
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_datasource(&pool, "loki", &mock.uri()).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/labels/{}", ds_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
+    async fn label_values_unsupported_returns_empty(pool: sqlx::PgPool) {
+        let ds_id = seed_datasource(&pool, "postgresql", "postgres://x").await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/labels/{}", ds_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let result: serde_json::Value = body_json(resp).await;
+        assert_eq!(result["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[sqlx::test]
+    async fn label_values_not_found(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/labels/{}", Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+}

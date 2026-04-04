@@ -119,3 +119,202 @@ async fn use_template(
 
     Ok(Json(dashboard))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn test_app(db: sqlx::PgPool) -> axum::Router {
+        let state = crate::AppState {
+            db,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+            },
+        };
+        template_routes().with_state(state)
+    }
+
+    async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    fn json_request(method_str: &str, uri: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method_str)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap()
+    }
+
+    async fn seed_template(pool: &sqlx::PgPool) {
+        sqlx::query(
+            "INSERT INTO dashboard_templates (slug, name, category, dashboard_json, is_active)
+             VALUES ('test-tmpl', 'Test Template', 'test',
+             '{\"panels\":[{\"title\":\"CPU\",\"type\":\"timeseries\",\"query\":\"rate(cpu[5m])\",\"position\":{\"x\":0,\"y\":0,\"w\":6,\"h\":3},\"config\":{}}]}',
+             true)"
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn seed_inactive_template(pool: &sqlx::PgPool) {
+        sqlx::query(
+            "INSERT INTO dashboard_templates (slug, name, category, dashboard_json, is_active)
+             VALUES ('inactive-tmpl', 'Inactive', 'test', '{\"panels\":[]}', false)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[sqlx::test]
+    async fn list_returns_seeded_templates(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let items: Vec<DashboardTemplate> = body_json(resp).await;
+        // Migration 002 seeds 6 active templates
+        assert_eq!(items.len(), 6);
+        assert!(items.iter().all(|t| t.is_active));
+    }
+
+    #[sqlx::test]
+    async fn list_excludes_inactive(pool: sqlx::PgPool) {
+        seed_inactive_template(&pool).await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let items: Vec<DashboardTemplate> = body_json(resp).await;
+        // 6 seeded active + 0 inactive (inactive-tmpl excluded)
+        assert_eq!(items.len(), 6);
+        assert!(!items.iter().any(|t| t.slug == "inactive-tmpl"));
+    }
+
+    #[sqlx::test]
+    async fn use_template_creates_dashboard_and_panels(pool: sqlx::PgPool) {
+        seed_template(&pool).await;
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/test-tmpl/use",
+                serde_json::json!({
+                    "title": "My Dashboard",
+                    "slug": "my-dash"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let dashboard: super::super::dashboards::Dashboard = body_json(resp).await;
+        assert_eq!(dashboard.title, "My Dashboard");
+        assert_eq!(dashboard.slug, "my-dash");
+
+        // Verify panels were created
+        let panel_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM panels WHERE dashboard_id = $1")
+                .bind(dashboard.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(panel_count, 1);
+    }
+
+    #[sqlx::test]
+    async fn use_template_not_found(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/nonexistent/use",
+                serde_json::json!({
+                    "title": "X", "slug": "x"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test]
+    async fn use_template_with_datasource_id(pool: sqlx::PgPool) {
+        seed_template(&pool).await;
+        let ds_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', 'http://prom:9090') RETURNING id"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/test-tmpl/use",
+                serde_json::json!({
+                    "title": "With DS", "slug": "with-ds", "datasource_id": ds_id
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let dashboard: super::super::dashboards::Dashboard = body_json(resp).await;
+
+        // Verify panel has datasource_id set
+        let panel_ds_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT datasource_id FROM panels WHERE dashboard_id = $1 LIMIT 1")
+                .bind(dashboard.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(panel_ds_id, Some(ds_id));
+    }
+
+    #[sqlx::test]
+    async fn use_template_no_panels_key(pool: sqlx::PgPool) {
+        sqlx::query(
+            "INSERT INTO dashboard_templates (slug, name, category, dashboard_json, is_active)
+             VALUES ('empty-tmpl', 'Empty', 'test', '{\"other\": true}', true)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/empty-tmpl/use",
+                serde_json::json!({
+                    "title": "From Empty", "slug": "from-empty"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let dashboard: super::super::dashboards::Dashboard = body_json(resp).await;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM panels WHERE dashboard_id = $1")
+            .bind(dashboard.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+}

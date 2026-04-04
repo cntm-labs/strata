@@ -194,3 +194,265 @@ async fn list_events(
 
     Ok(Json(rows))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn test_app(db: sqlx::PgPool) -> axum::Router {
+        let state = crate::AppState {
+            db,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+            },
+        };
+        alert_routes().with_state(state)
+    }
+
+    async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    fn json_request(method_str: &str, uri: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method_str)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap()
+    }
+
+    async fn seed_datasource(pool: &sqlx::PgPool) -> Uuid {
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url) VALUES ('Test', 'prometheus', 'http://prom:9090') RETURNING id"
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn create_rule_helper(pool: &sqlx::PgPool, ds_id: Uuid, name: &str) -> AlertRule {
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/rules",
+                serde_json::json!({
+                    "name": name,
+                    "datasource_id": ds_id,
+                    "query": "up == 0",
+                    "condition": "gt",
+                    "threshold": 0.5,
+                    "notification_channels": ["sms"],
+                    "notification_recipients": ["+66123456789"]
+                }),
+            ))
+            .await
+            .unwrap();
+        body_json(resp).await
+    }
+
+    #[sqlx::test]
+    async fn list_rules_empty(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(Request::get("/rules").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let items: Vec<AlertRule> = body_json(resp).await;
+        assert!(items.is_empty());
+    }
+
+    #[sqlx::test]
+    async fn create_and_get_rule(pool: sqlx::PgPool) {
+        let ds_id = seed_datasource(&pool).await;
+        let created = create_rule_helper(&pool, ds_id, "CPU Alert").await;
+        assert_eq!(created.name, "CPU Alert");
+        assert_eq!(created.condition, "gt");
+        assert!(created.is_active);
+        assert_eq!(created.severity, "warning");
+        assert_eq!(created.duration_secs, 60);
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/rules/{}", created.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let fetched: AlertRule = body_json(resp).await;
+        assert_eq!(fetched.id, created.id);
+    }
+
+    #[sqlx::test]
+    async fn get_rule_not_found(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let fake_id = Uuid::new_v4();
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/rules/{}", fake_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test]
+    async fn update_rule(pool: sqlx::PgPool) {
+        let ds_id = seed_datasource(&pool).await;
+        let created = create_rule_helper(&pool, ds_id, "Original").await;
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "PUT",
+                &format!("/rules/{}", created.id),
+                serde_json::json!({
+                    "name": "Updated",
+                    "severity": "critical",
+                    "is_active": false
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let updated: AlertRule = body_json(resp).await;
+        assert_eq!(updated.name, "Updated");
+        assert_eq!(updated.severity, "critical");
+        assert!(!updated.is_active);
+    }
+
+    #[sqlx::test]
+    async fn update_rule_not_found(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let fake_id = Uuid::new_v4();
+        let resp = app
+            .oneshot(json_request(
+                "PUT",
+                &format!("/rules/{}", fake_id),
+                serde_json::json!({"name": "x"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test]
+    async fn delete_rule(pool: sqlx::PgPool) {
+        let ds_id = seed_datasource(&pool).await;
+        let created = create_rule_helper(&pool, ds_id, "ToDelete").await;
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(
+                Request::delete(&format!("/rules/{}", created.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/rules/{}", created.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test]
+    async fn list_events_empty(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(Request::get("/events").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let items: Vec<AlertEvent> = body_json(resp).await;
+        assert!(items.is_empty());
+    }
+
+    #[sqlx::test]
+    async fn list_events_with_filter(pool: sqlx::PgPool) {
+        let ds_id = seed_datasource(&pool).await;
+        let rule = create_rule_helper(&pool, ds_id, "Rule1").await;
+
+        sqlx::query(
+            "INSERT INTO alert_events (rule_id, state, value, message) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(rule.id)
+        .bind("firing")
+        .bind(1.5_f64)
+        .bind("CPU high")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(
+                Request::get(&format!("/events?rule_id={}&limit=10", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let items: Vec<AlertEvent> = body_json(resp).await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].state, "firing");
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(Request::get("/events").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let all_items: Vec<AlertEvent> = body_json(resp).await;
+        assert_eq!(all_items.len(), 1);
+    }
+
+    #[sqlx::test]
+    async fn create_rule_with_custom_severity_and_duration(pool: sqlx::PgPool) {
+        let ds_id = seed_datasource(&pool).await;
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/rules",
+                serde_json::json!({
+                    "name": "Custom",
+                    "datasource_id": ds_id,
+                    "query": "up",
+                    "condition": "lt",
+                    "threshold": 1.0,
+                    "duration_secs": 300,
+                    "severity": "critical",
+                    "notification_channels": ["email"],
+                    "notification_recipients": ["admin@test.com"]
+                }),
+            ))
+            .await
+            .unwrap();
+        let created: AlertRule = body_json(resp).await;
+        assert_eq!(created.duration_secs, 300);
+        assert_eq!(created.severity, "critical");
+    }
+}
