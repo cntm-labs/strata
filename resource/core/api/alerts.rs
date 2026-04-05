@@ -80,6 +80,7 @@ pub fn alert_routes() -> Router<AppState> {
             "/rules/{id}",
             get(get_rule).put(update_rule).delete(delete_rule),
         )
+        .route("/rules/{id}/test", axum::routing::post(test_fire_rule))
         .route("/events", get(list_events))
 }
 
@@ -167,6 +168,70 @@ async fn delete_rule(State(state): State<AppState>, Path(id): Path<Uuid>) -> App
         .execute(&state.db)
         .await?;
     Ok(Json(()))
+}
+
+async fn test_fire_rule(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<AlertEvent>> {
+    let rule = sqlx::query_as::<_, AlertRule>("SELECT * FROM alert_rules WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Alert rule not found".into()))?;
+
+    let ds = sqlx::query_as::<_, super::datasources::Datasource>(
+        "SELECT * FROM datasources WHERE id = $1",
+    )
+    .bind(rule.datasource_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
+
+    // Execute query against datasource
+    let value = match ds.ds_type.as_str() {
+        "prometheus" => {
+            let client = crate::datasource::prometheus::PrometheusClient::new(&ds.url);
+            let resp = client.query(&rule.query, None, None).await?;
+            resp.data
+                .get("result")
+                .and_then(|r| r.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|m| m.get("value"))
+                .and_then(|v| v.as_array())
+                .and_then(|v| v.get(1))
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+        }
+        _ => None,
+    };
+
+    let val = value.unwrap_or(0.0);
+    let firing = match rule.condition.as_str() {
+        "gt" => val > rule.threshold,
+        "gte" => val >= rule.threshold,
+        "lt" => val < rule.threshold,
+        "lte" => val <= rule.threshold,
+        "eq" => (val - rule.threshold).abs() < f64::EPSILON,
+        _ => false,
+    };
+
+    let state_str = if firing { "firing" } else { "ok" };
+    let event = sqlx::query_as::<_, AlertEvent>(
+        "INSERT INTO alert_events (rule_id, state, value, message)
+         VALUES ($1, $2, $3, $4) RETURNING *",
+    )
+    .bind(rule.id)
+    .bind(state_str)
+    .bind(val)
+    .bind(format!(
+        "Test fire: {} = {:.2}, threshold {:.2} ({})",
+        rule.query, val, rule.threshold, rule.condition
+    ))
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(event))
 }
 
 async fn list_events(
@@ -427,6 +492,81 @@ mod tests {
             .unwrap();
         let all_items: Vec<AlertEvent> = body_json(resp).await;
         assert_eq!(all_items.len(), 1);
+    }
+
+    #[sqlx::test]
+    async fn test_fire_rule_creates_event(pool: sqlx::PgPool) {
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/api/v1/query"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "status": "success",
+                    "data": {"resultType": "vector", "result": [
+                        {"metric": {"__name__": "up"}, "value": [1700000000, "1.0"]}
+                    ]}
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ds_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', $1) RETURNING id",
+        )
+        .bind(mock.uri())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let rule = {
+            let app = test_app(pool.clone());
+            let resp = app
+                .oneshot(json_request(
+                    "POST",
+                    "/rules",
+                    serde_json::json!({
+                        "name": "Test Fire",
+                        "datasource_id": ds_id,
+                        "query": "up",
+                        "condition": "gt",
+                        "threshold": 0.5,
+                        "notification_channels": ["sms"],
+                        "notification_recipients": ["+66123456789"]
+                    }),
+                ))
+                .await
+                .unwrap();
+            body_json::<AlertRule>(resp).await
+        };
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let event: AlertEvent = body_json(resp).await;
+        assert_eq!(event.rule_id, rule.id);
+        assert_eq!(event.state, "firing");
+        assert!(event.value.unwrap() > 0.0);
+    }
+
+    #[sqlx::test]
+    async fn test_fire_rule_not_found(pool: sqlx::PgPool) {
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[sqlx::test]

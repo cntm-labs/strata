@@ -94,6 +94,7 @@
 | GET | `/api/v1/alerts/rules/:id` | Get rule |
 | PUT | `/api/v1/alerts/rules/:id` | Update rule |
 | DELETE | `/api/v1/alerts/rules/:id` | Delete rule |
+| POST | `/api/v1/alerts/rules/:id/test` | Test fire alert rule |
 | GET | `/api/v1/alerts/events` | Alert history |
 
 ### Explore
@@ -109,4 +110,4 @@
 | GET | `/api/v1/templates` | List dashboard templates |
 | POST | `/api/v1/templates/:slug/use` | Create dashboard from template |
 
-## Total: 16 frontend pages + 28 API endpoints
+## Total: 16 frontend pages + 29 API endpoints
