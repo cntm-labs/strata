@@ -2,14 +2,7 @@
 
 > Current routes and pages for the Strata dashboard application.
 
-## Public Routes (no auth)
-
-| Route | Page | Description |
-|-------|------|-------------|
-| `/login` | Login | Redirect to Nucleus OAuth |
-| `/auth/callback` | Auth Callback | Handle Nucleus OAuth callback |
-
-## Protected Routes (requires auth)
+## Frontend Routes
 
 ### Dashboards
 
@@ -58,20 +51,18 @@
 
 ## API Routes (Rust backend)
 
-### Auth
+### Health
+
 | Method | Route | Description |
 |--------|-------|-------------|
-| GET | `/api/v1/auth/login` | Redirect to Nucleus OAuth |
-| GET | `/api/v1/auth/callback` | Handle OAuth callback |
-| GET | `/api/v1/auth/me` | Current user info |
-| POST | `/api/v1/auth/logout` | Clear session |
+| GET | `/api/v1/health` | Health check |
 
 ### Dashboards
 | Method | Route | Description |
 |--------|-------|-------------|
 | GET | `/api/v1/dashboards` | List dashboards |
 | POST | `/api/v1/dashboards` | Create dashboard |
-| GET | `/api/v1/dashboards/:slug` | Get dashboard + panels |
+| GET | `/api/v1/dashboards/:slug` | Get dashboard |
 | PUT | `/api/v1/dashboards/:slug` | Update dashboard |
 | DELETE | `/api/v1/dashboards/:slug` | Delete dashboard |
 | POST | `/api/v1/dashboards/:slug/star` | Star/unstar |
@@ -89,6 +80,7 @@
 |--------|-------|-------------|
 | GET | `/api/v1/datasources` | List datasources |
 | POST | `/api/v1/datasources` | Add datasource |
+| GET | `/api/v1/datasources/:id` | Get datasource |
 | PUT | `/api/v1/datasources/:id` | Update datasource |
 | DELETE | `/api/v1/datasources/:id` | Delete datasource |
 | POST | `/api/v1/datasources/:id/query` | Proxy query |
@@ -99,16 +91,17 @@
 |--------|-------|-------------|
 | GET | `/api/v1/alerts/rules` | List alert rules |
 | POST | `/api/v1/alerts/rules` | Create rule |
+| GET | `/api/v1/alerts/rules/:id` | Get rule |
 | PUT | `/api/v1/alerts/rules/:id` | Update rule |
 | DELETE | `/api/v1/alerts/rules/:id` | Delete rule |
 | GET | `/api/v1/alerts/events` | Alert history |
-| POST | `/api/v1/alerts/test/:id` | Test fire alert |
 
 ### Explore
 | Method | Route | Description |
 |--------|-------|-------------|
 | POST | `/api/v1/explore/query` | Execute ad-hoc query |
 | GET | `/api/v1/explore/history` | Recent queries |
+| GET | `/api/v1/explore/labels/:datasource_id` | Label values |
 
 ### Templates
 | Method | Route | Description |
@@ -116,4 +109,4 @@
 | GET | `/api/v1/templates` | List dashboard templates |
 | POST | `/api/v1/templates/:slug/use` | Create dashboard from template |
 
-## Total: 16 frontend pages + 25 API endpoints
+## Total: 16 frontend pages + 28 API endpoints

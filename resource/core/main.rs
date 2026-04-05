@@ -53,6 +53,11 @@ async fn main() {
         .await
         .expect("Failed to connect to database");
 
+    sqlx::migrate!("./migrations")
+        .run(&db)
+        .await
+        .expect("Failed to run database migrations");
+
     let state = AppState {
         db,
         config: config.clone(),
