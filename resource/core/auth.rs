@@ -41,7 +41,7 @@ pub async fn require_auth(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let mut validation = Validation::new(jsonwebtoken::Algorithm::ES256);
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
     validation.set_required_spec_claims(&["sub", "exp", "iat"]);
 
     let token_data = decode::<NucleusClaims>(
@@ -57,4 +57,169 @@ pub async fn require_auth(
     req.extensions_mut().insert(token_data.claims);
 
     Ok(next.run(req).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use tower::ServiceExt;
+
+    fn make_test_token(secret: &str) -> String {
+        let claims = NucleusClaims {
+            sub: "user-123".into(),
+            email: Some("test@test.com".into()),
+            first_name: Some("Test".into()),
+            last_name: Some("User".into()),
+            avatar_url: None,
+            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
+            iat: chrono::Utc::now().timestamp() as u64,
+        };
+        encode(
+            &Header::new(jsonwebtoken::Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    fn make_expired_token(secret: &str) -> String {
+        let claims = NucleusClaims {
+            sub: "user-123".into(),
+            email: Some("test@test.com".into()),
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            exp: 1000,
+            iat: 999,
+        };
+        encode(
+            &Header::new(jsonwebtoken::Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn valid_token_passes_through(pool: sqlx::PgPool) {
+        let secret = "test-secret-key";
+        let state = crate::AppState {
+            db: pool,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_secret_key: Some(secret.into()),
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
+        let app = crate::build_router(state);
+
+        let token = make_test_token(secret);
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Should pass auth — dashboards returns 200 (empty list)
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
+    async fn expired_token_returns_401(pool: sqlx::PgPool) {
+        let secret = "test-secret-key";
+        let state = crate::AppState {
+            db: pool,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_secret_key: Some(secret.into()),
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
+        let app = crate::build_router(state);
+
+        let token = make_expired_token(secret);
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn wrong_secret_returns_401(pool: sqlx::PgPool) {
+        let state = crate::AppState {
+            db: pool,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_secret_key: Some("correct-secret".into()),
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
+        let app = crate::build_router(state);
+
+        let token = make_test_token("wrong-secret");
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn missing_bearer_prefix_returns_401(pool: sqlx::PgPool) {
+        let state = crate::AppState {
+            db: pool,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_secret_key: Some("secret".into()),
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
+        let app = crate::build_router(state);
+
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .header("Authorization", "Token some-token")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
 }

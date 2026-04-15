@@ -18,7 +18,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      - run: cargo audit
+      # RUSTSEC-2023-0071: rsa timing sidechannel via sqlx-mysql (transitive dep)
+      # Strata only uses PostgreSQL. sqlx-macros-core unconditionally pulls sqlx-mysql.
+      # No upstream fix available.
+      - run: cargo audit --ignore RUSTSEC-2023-0071
 
   cargo-deny:
     runs-on: ubuntu-latest

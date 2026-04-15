@@ -46,3 +46,40 @@ impl Notifier {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_without_api_key_creates_disabled_notifier() {
+        let notifier = Notifier::new(None, "test@test.com");
+        assert!(notifier.chorus.is_none());
+    }
+
+    #[test]
+    fn new_with_api_key_creates_enabled_notifier() {
+        let notifier = Notifier::new(Some("re_test_key"), "alerts@test.com");
+        assert!(notifier.chorus.is_some());
+    }
+
+    #[tokio::test]
+    async fn send_alert_email_skips_when_not_configured() {
+        let notifier = Notifier::new(None, "test@test.com");
+        let result = notifier
+            .send_alert_email("user@test.com", "CPU Alert", "CPU is at 95%")
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn send_alert_email_with_configured_notifier_attempts_send() {
+        // Resend API will reject the fake key, but we verify the error path works
+        let notifier = Notifier::new(Some("re_fake_key"), "alerts@test.com");
+        let result = notifier
+            .send_alert_email("user@test.com", "CPU Alert", "CPU is at 95%")
+            .await;
+        // Should fail because the API key is fake, but should not panic
+        assert!(result.is_err());
+    }
+}
