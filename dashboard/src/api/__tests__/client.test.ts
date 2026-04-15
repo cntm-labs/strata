@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { useAuth } from '@/composables/useAuth'
 
 const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
@@ -7,6 +8,7 @@ const { api } = await import('../client')
 
 beforeEach(() => {
   mockFetch.mockReset()
+  useAuth().clearToken()
 })
 
 describe('api client', () => {
@@ -121,6 +123,69 @@ describe('api client', () => {
       })
 
       await expect(api.get('/bad')).rejects.toThrow('HTTP 400')
+    })
+  })
+
+  describe('authentication', () => {
+    it('attaches Bearer token when authenticated', async () => {
+      const { setToken } = useAuth()
+      // Minimal valid JWT structure (header.payload.signature)
+      const fakeJwt =
+        'eyJhbGciOiJFUzI1NiJ9.' +
+        btoa(JSON.stringify({ sub: '1', email: 'test@test.com' })) +
+        '.fakesig'
+      setToken(fakeJwt)
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: 'ok' }),
+      })
+
+      await api.get('/dashboards')
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/v1/dashboards', {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${fakeJwt}`,
+        },
+      })
+    })
+
+    it('does not attach Authorization header when not authenticated', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: 'ok' }),
+      })
+
+      await api.get('/dashboards')
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/v1/dashboards', {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    it('clears token and redirects on 401', async () => {
+      const { setToken, getToken } = useAuth()
+      const fakeJwt =
+        'eyJhbGciOiJFUzI1NiJ9.' +
+        btoa(JSON.stringify({ sub: '1', email: 'test@test.com' })) +
+        '.fakesig'
+      setToken(fakeJwt)
+
+      const mockLocation = { href: '' }
+      vi.stubGlobal('location', mockLocation)
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      })
+
+      await expect(api.get('/protected')).rejects.toThrow('Unauthorized')
+      expect(getToken()).toBeNull()
+      expect(mockLocation.href).toBe('/login')
+
+      vi.unstubAllGlobals()
+      vi.stubGlobal('fetch', mockFetch)
     })
   })
 })

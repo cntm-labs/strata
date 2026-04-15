@@ -231,6 +231,36 @@ async fn test_fire_rule(
     .fetch_one(&state.db)
     .await?;
 
+    if firing {
+        let email_recipients: Vec<String> = rule
+            .notification_recipients
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .filter(|r| r.contains('@'))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for recipient in &email_recipients {
+            if let Err(e) = state
+                .notifier
+                .send_alert_email(
+                    recipient,
+                    &rule.name,
+                    &format!(
+                        "{} = {:.2}, threshold {:.2} ({})",
+                        rule.query, val, rule.threshold, rule.condition
+                    ),
+                )
+                .await
+            {
+                tracing::error!("Failed to send alert email to {}: {}", recipient, e);
+            }
+        }
+    }
+
     Ok(Json(event))
 }
 
@@ -275,7 +305,12 @@ mod tests {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
                 port: 3000,
+                nucleus_secret_key: None,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
             },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
         alert_routes().with_state(state)
     }

@@ -5,6 +5,16 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+    },
+    {
+      path: '/auth/callback',
+      name: 'auth-callback',
+      component: () => import('@/views/AuthCallbackView.vue'),
+    },
+    {
       path: '/',
       component: AppLayout,
       children: [
@@ -83,5 +93,19 @@ const router = createRouter({
     },
   ],
 })
+
+const authEnabled = import.meta.env.VITE_AUTH_ENABLED === 'true'
+
+if (authEnabled) {
+  const { useAuth } = await import('@/composables/useAuth')
+
+  router.beforeEach((to) => {
+    const { isAuthenticated } = useAuth()
+    const publicRoutes = ['login', 'auth-callback']
+    if (!publicRoutes.includes(to.name as string) && !isAuthenticated.value) {
+      return { name: 'login' }
+    }
+  })
+}
 
 export default router
