@@ -17,7 +17,9 @@ export function useAuth() {
   function setToken(jwt: string) {
     token.value = jwt
     try {
-      const payload = JSON.parse(atob(jwt.split('.')[1]))
+      const payloadPart = jwt.split('.')[1]
+      if (!payloadPart) throw new Error('Invalid JWT')
+      const payload = JSON.parse(atob(payloadPart))
       user.value = {
         id: payload.sub,
         email: payload.email,

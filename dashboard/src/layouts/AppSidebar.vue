@@ -42,7 +42,7 @@ const initials = computed(() => {
   if (!user.value) return ''
   const first = user.value.firstName?.[0] ?? ''
   const last = user.value.lastName?.[0] ?? ''
-  return (first + last).toUpperCase() || user.value.email[0].toUpperCase()
+  return (first + last).toUpperCase() || user.value.email?.[0]?.toUpperCase() || '?'
 })
 
 function logout() {
