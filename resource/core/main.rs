@@ -1,7 +1,11 @@
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod datasource;
 pub mod error;
+pub mod notifier;
+
+use std::sync::Arc;
 
 use axum::{routing::get, Json, Router};
 use config::AppConfig;
@@ -15,6 +19,7 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: AppConfig,
+    pub notifier: Arc<notifier::Notifier>,
 }
 
 async fn health() -> Json<Value> {
@@ -22,15 +27,28 @@ async fn health() -> Json<Value> {
 }
 
 pub fn build_router(state: AppState) -> Router {
-    Router::new()
-        .route("/api/v1/health", get(health))
+    let public = Router::new().route("/api/v1/health", get(health));
+
+    let protected = Router::new()
         .nest("/api/v1/datasources", api::datasources::datasource_routes())
         .nest("/api/v1/dashboards", api::dashboards::dashboard_routes())
         .nest("/api/v1", api::panels::panel_routes_nested())
         .nest("/api/v1/explore", api::explore::explore_routes())
         .nest("/api/v1/alerts", api::alerts::alert_routes())
-        .nest("/api/v1/templates", api::templates::template_routes())
-        .with_state(state)
+        .nest("/api/v1/templates", api::templates::template_routes());
+
+    let protected = if state.config.nucleus_secret_key.is_some() {
+        protected.layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ))
+    } else {
+        tracing::warn!("NUCLEUS_SECRET_KEY not set — running without authentication");
+        protected
+    };
+
+    public
+        .merge(protected.with_state(state))
         .fallback_service(ServeDir::new("static").fallback(ServeFile::new("static/index.html")))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -58,9 +76,15 @@ async fn main() {
         .await
         .expect("Failed to run database migrations");
 
+    let notifier = Arc::new(notifier::Notifier::new(
+        config.resend_api_key.as_deref(),
+        &config.alert_from_email,
+    ));
+
     let state = AppState {
         db,
         config: config.clone(),
+        notifier,
     };
 
     let app = build_router(state);
@@ -80,13 +104,22 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_state(db: sqlx::PgPool) -> AppState {
+        test_state_with_auth(db, None)
+    }
+
+    fn test_state_with_auth(db: sqlx::PgPool, secret_key: Option<String>) -> AppState {
         AppState {
             db,
             config: AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
                 port: 3000,
+                nucleus_secret_key: secret_key,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
             },
+            notifier: Arc::new(notifier::Notifier::new(None, "test@test.com")),
         }
     }
 
@@ -116,5 +149,47 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json, serde_json::json!({"status": "ok"}));
+    }
+
+    #[sqlx::test]
+    async fn protected_route_requires_auth_when_configured(pool: sqlx::PgPool) {
+        let state = test_state_with_auth(pool, Some("sk_test_fake".into()));
+        let app = build_router(state);
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn protected_route_rejects_invalid_token(pool: sqlx::PgPool) {
+        let state = test_state_with_auth(pool, Some("sk_test_fake".into()));
+        let app = build_router(state);
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .header("Authorization", "Bearer invalid.jwt.token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn health_accessible_even_with_auth_configured(pool: sqlx::PgPool) {
+        let state = test_state_with_auth(pool, Some("sk_test_fake".into()));
+        let app = build_router(state);
+        let resp = app
+            .oneshot(Request::get("/api/v1/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

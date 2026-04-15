@@ -43,6 +43,13 @@
 |-------|------|-------------|
 | `/templates` | Template Gallery | Browse built-in dashboard templates |
 
+### Auth
+
+| Route | Page | Description |
+|-------|------|-------------|
+| `/login` | Login | Redirect to Nucleus OAuth |
+| `/auth/callback` | Auth Callback | Handle OAuth token, redirect to dashboards |
+
 ### Settings
 
 | Route | Page | Description |
@@ -110,4 +117,4 @@
 | GET | `/api/v1/templates` | List dashboard templates |
 | POST | `/api/v1/templates/:slug/use` | Create dashboard from template |
 
-## Total: 16 frontend pages + 29 API endpoints
+## Total: 18 frontend pages + 29 API endpoints

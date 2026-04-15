@@ -162,7 +162,12 @@ mod tests {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
                 port: 3000,
+                nucleus_secret_key: None,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
             },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
         dashboard_routes().with_state(state)
     }

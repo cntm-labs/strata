@@ -8,6 +8,8 @@ describe('router', () => {
   })
 
   const expectedRoutes = [
+    '/login',
+    '/auth/callback',
     '/dashboards',
     '/dashboards/new',
     '/dashboards/:slug',

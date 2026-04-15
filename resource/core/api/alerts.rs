@@ -231,6 +231,36 @@ async fn test_fire_rule(
     .fetch_one(&state.db)
     .await?;
 
+    if firing {
+        let email_recipients: Vec<String> = rule
+            .notification_recipients
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .filter(|r| r.contains('@'))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for recipient in &email_recipients {
+            if let Err(e) = state
+                .notifier
+                .send_alert_email(
+                    recipient,
+                    &rule.name,
+                    &format!(
+                        "{} = {:.2}, threshold {:.2} ({})",
+                        rule.query, val, rule.threshold, rule.condition
+                    ),
+                )
+                .await
+            {
+                tracing::error!("Failed to send alert email to {}: {}", recipient, e);
+            }
+        }
+    }
+
     Ok(Json(event))
 }
 
@@ -275,7 +305,12 @@ mod tests {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
                 port: 3000,
+                nucleus_secret_key: None,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
             },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
         alert_routes().with_state(state)
     }
@@ -594,5 +629,236 @@ mod tests {
         let created: AlertRule = body_json(resp).await;
         assert_eq!(created.duration_secs, 300);
         assert_eq!(created.severity, "critical");
+    }
+
+    #[sqlx::test]
+    async fn test_fire_with_email_recipients(pool: sqlx::PgPool) {
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/api/v1/query"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "status": "success",
+                    "data": {"resultType": "vector", "result": [
+                        {"metric": {"__name__": "up"}, "value": [1700000000, "1.0"]}
+                    ]}
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ds_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', $1) RETURNING id",
+        )
+        .bind(mock.uri())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let rule = {
+            let app = test_app(pool.clone());
+            let resp = app
+                .oneshot(json_request(
+                    "POST",
+                    "/rules",
+                    serde_json::json!({
+                        "name": "Email Alert",
+                        "datasource_id": ds_id,
+                        "query": "up",
+                        "condition": "gte",
+                        "threshold": 1.0,
+                        "notification_channels": ["email"],
+                        "notification_recipients": ["admin@test.com", "+66123456789"]
+                    }),
+                ))
+                .await
+                .unwrap();
+            body_json::<AlertRule>(resp).await
+        };
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let event: AlertEvent = body_json(resp).await;
+        assert_eq!(event.state, "firing");
+    }
+
+    #[sqlx::test]
+    async fn test_fire_non_prometheus_datasource(pool: sqlx::PgPool) {
+        let ds_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url) VALUES ('PG', 'postgresql', 'postgres://localhost') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let rule = {
+            let app = test_app(pool.clone());
+            let resp = app
+                .oneshot(json_request(
+                    "POST",
+                    "/rules",
+                    serde_json::json!({
+                        "name": "PG Alert",
+                        "datasource_id": ds_id,
+                        "query": "SELECT 1",
+                        "condition": "eq",
+                        "threshold": 0.0,
+                        "notification_channels": ["email"],
+                        "notification_recipients": ["admin@test.com"]
+                    }),
+                ))
+                .await
+                .unwrap();
+            body_json::<AlertRule>(resp).await
+        };
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let event: AlertEvent = body_json(resp).await;
+        // Non-prometheus returns None → val=0.0, eq with threshold 0.0 → firing
+        assert_eq!(event.state, "firing");
+    }
+
+    #[sqlx::test]
+    async fn test_fire_condition_branches(pool: sqlx::PgPool) {
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/api/v1/query"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "status": "success",
+                    "data": {"resultType": "vector", "result": [
+                        {"metric": {"__name__": "up"}, "value": [1700000000, "5.0"]}
+                    ]}
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ds_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', $1) RETURNING id",
+        )
+        .bind(mock.uri())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        // Test "lt" condition: 5.0 < 10.0 → firing
+        let rule = {
+            let app = test_app(pool.clone());
+            let resp = app
+                .oneshot(json_request(
+                    "POST",
+                    "/rules",
+                    serde_json::json!({
+                        "name": "LT Alert",
+                        "datasource_id": ds_id,
+                        "query": "up",
+                        "condition": "lt",
+                        "threshold": 10.0,
+                        "notification_channels": [],
+                        "notification_recipients": []
+                    }),
+                ))
+                .await
+                .unwrap();
+            body_json::<AlertRule>(resp).await
+        };
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let event: AlertEvent = body_json(resp).await;
+        assert_eq!(event.state, "firing");
+
+        // Test "lte" condition: 5.0 <= 5.0 → firing
+        let rule = {
+            let app = test_app(pool.clone());
+            let resp = app
+                .oneshot(json_request(
+                    "POST",
+                    "/rules",
+                    serde_json::json!({
+                        "name": "LTE Alert",
+                        "datasource_id": ds_id,
+                        "query": "up",
+                        "condition": "lte",
+                        "threshold": 5.0,
+                        "notification_channels": [],
+                        "notification_recipients": []
+                    }),
+                ))
+                .await
+                .unwrap();
+            body_json::<AlertRule>(resp).await
+        };
+
+        let app = test_app(pool.clone());
+        let resp = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let event: AlertEvent = body_json(resp).await;
+        assert_eq!(event.state, "firing");
+
+        // Test unknown condition: always "ok"
+        let rule = {
+            let app = test_app(pool.clone());
+            let resp = app
+                .oneshot(json_request(
+                    "POST",
+                    "/rules",
+                    serde_json::json!({
+                        "name": "Unknown Alert",
+                        "datasource_id": ds_id,
+                        "query": "up",
+                        "condition": "unknown",
+                        "threshold": 5.0,
+                        "notification_channels": [],
+                        "notification_recipients": []
+                    }),
+                ))
+                .await
+                .unwrap();
+            body_json::<AlertRule>(resp).await
+        };
+
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let event: AlertEvent = body_json(resp).await;
+        assert_eq!(event.state, "ok");
     }
 }

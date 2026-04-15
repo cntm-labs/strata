@@ -1,10 +1,26 @@
+import { useAuth } from '@/composables/useAuth'
+
 const BASE_URL = '/api/v1'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const { getToken, clearToken } = useAuth()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const jwt = getToken()
+  if (jwt) {
+    headers['Authorization'] = `Bearer ${jwt}`
+  }
+
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...options,
   })
+
+  if (res.status === 401) {
+    clearToken()
+    window.location.href = '/login'
+    throw new Error('Unauthorized')
+  }
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: res.statusText }))
     throw new Error(error.message || `HTTP ${res.status}`)
