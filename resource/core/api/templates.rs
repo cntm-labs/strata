@@ -182,6 +182,32 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn chorus_overview_has_10_panels(pool: sqlx::PgPool) {
+        let template = sqlx::query_as::<_, DashboardTemplate>(
+            "SELECT * FROM dashboard_templates WHERE slug = 'chorus-overview'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let panels = template
+            .dashboard_json
+            .get("panels")
+            .and_then(|p| p.as_array())
+            .expect("chorus-overview should have panels array");
+        assert_eq!(panels.len(), 10, "chorus-overview should have 10 panels");
+
+        let types: Vec<&str> = panels
+            .iter()
+            .filter_map(|p| p.get("type").and_then(|t| t.as_str()))
+            .collect();
+        assert!(types.contains(&"stat"));
+        assert!(types.contains(&"gauge"));
+        assert!(types.contains(&"timeseries"));
+        assert!(types.contains(&"piechart"));
+    }
+
+    #[sqlx::test]
     async fn list_returns_seeded_templates(pool: sqlx::PgPool) {
         let app = test_app(pool);
         let resp = app
