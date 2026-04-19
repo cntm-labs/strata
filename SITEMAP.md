@@ -117,4 +117,4 @@
 | GET | `/api/v1/templates` | List dashboard templates |
 | POST | `/api/v1/templates/:slug/use` | Create dashboard from template |
 
-## Total: 18 frontend pages + 29 API endpoints
+## Total: 18 frontend pages + 29 API endpoints + 8 dashboard templates
