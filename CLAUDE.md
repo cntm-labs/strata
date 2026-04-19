@@ -118,3 +118,10 @@ npm run format                   # Prettier
 - **Chorus** (github.com/cntm-labs/chorus) — CPaaS for alert notifications
 - **Nucleus** (github.com/cntm-labs/nucleus) — Auth provider
 - **Orbit** (github.com/cntm-labs/orbit-api) — Finance API (observed by Strata)
+
+## Deployment
+- **Deployment architecture:** See `docs/deployment-architecture.md`
+- **Docker Compose:** `docker-compose.yml` (dev), `docker-compose.production.yml` (production, TODO)
+- **Container registry:** `ghcr.io/cntm-labs/strata` (pushed on release tags)
+- **Kubernetes:** Helm chart planned (see deployment architecture doc)
+- **SaaS:** Multi-tenant architecture designed, not yet implemented
