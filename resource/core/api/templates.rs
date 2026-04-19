@@ -216,8 +216,8 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let items: Vec<DashboardTemplate> = body_json(resp).await;
-        // Migration 002 seeds 6 active templates
-        assert_eq!(items.len(), 6);
+        // Migration 002 seeds 6 + migration 004 adds 2 = 8 active templates
+        assert_eq!(items.len(), 8);
         assert!(items.iter().all(|t| t.is_active));
     }
 
@@ -231,9 +231,64 @@ mod tests {
             .await
             .unwrap();
         let items: Vec<DashboardTemplate> = body_json(resp).await;
-        // 6 seeded active + 0 inactive (inactive-tmpl excluded)
-        assert_eq!(items.len(), 6);
+        // 8 seeded active + 0 inactive (inactive-tmpl excluded)
+        assert_eq!(items.len(), 8);
         assert!(!items.iter().any(|t| t.slug == "inactive-tmpl"));
+    }
+
+    #[sqlx::test]
+    async fn chorus_logs_template_has_5_panels(pool: sqlx::PgPool) {
+        let template = sqlx::query_as::<_, DashboardTemplate>(
+            "SELECT * FROM dashboard_templates WHERE slug = 'chorus-logs'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(template.required_datasource_type.as_deref(), Some("loki"));
+        assert_eq!(template.category, "cpaas");
+
+        let panels = template
+            .dashboard_json
+            .get("panels")
+            .and_then(|p| p.as_array())
+            .expect("chorus-logs should have panels array");
+        assert_eq!(panels.len(), 5);
+
+        // Verify logs panel type exists
+        let has_logs = panels
+            .iter()
+            .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("logs"));
+        assert!(has_logs, "chorus-logs should have a logs panel");
+    }
+
+    #[sqlx::test]
+    async fn chorus_costs_template_has_6_panels(pool: sqlx::PgPool) {
+        let template = sqlx::query_as::<_, DashboardTemplate>(
+            "SELECT * FROM dashboard_templates WHERE slug = 'chorus-costs'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            template.required_datasource_type.as_deref(),
+            Some("postgresql")
+        );
+        assert_eq!(template.category, "cpaas");
+
+        let panels = template
+            .dashboard_json
+            .get("panels")
+            .and_then(|p| p.as_array())
+            .expect("chorus-costs should have panels array");
+        assert_eq!(panels.len(), 6);
+
+        // Verify table panel type exists (top accounts)
+        let has_table = panels
+            .iter()
+            .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("table"));
+        assert!(has_table, "chorus-costs should have a table panel");
     }
 
     #[sqlx::test]
