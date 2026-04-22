@@ -3,6 +3,7 @@ pub mod auth;
 pub mod config;
 pub mod datasource;
 pub mod error;
+pub mod middleware;
 pub mod notifier;
 
 use std::sync::Arc;
@@ -35,7 +36,11 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1", api::panels::panel_routes_nested())
         .nest("/api/v1/explore", api::explore::explore_routes())
         .nest("/api/v1/alerts", api::alerts::alert_routes())
-        .nest("/api/v1/templates", api::templates::template_routes());
+        .nest("/api/v1/templates", api::templates::template_routes())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::tenant::set_tenant_context,
+        ));
 
     let protected = if state.config.nucleus_secret_key.is_some() {
         protected.layer(axum::middleware::from_fn_with_state(
