@@ -1,21 +1,98 @@
-CREATE TABLE tenants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+-- 005_multi_tenant_rls.sql
+-- Adds the tenant registry, the tenant_id column and RLS policy to every
+-- tenant-owned table, and the composite indexes the new query plans need.
+-- Idempotent: safe to re-run after a partial earlier attempt.
+
+BEGIN;
+
+-- 1. Tenant registry
+CREATE TABLE IF NOT EXISTS tenants (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT NOT NULL,
+    slug        TEXT NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Add tenant_id to existing tables
-ALTER TABLE dashboards ADD COLUMN tenant_id UUID REFERENCES tenants(id);
-ALTER TABLE panels ADD COLUMN tenant_id UUID REFERENCES tenants(id);
-ALTER TABLE alerts ADD COLUMN tenant_id UUID REFERENCES tenants(id);
+-- Default tenant used by the mock middleware and for backfill of pre-existing rows.
+INSERT INTO tenants (id, name, slug)
+VALUES ('00000000-0000-0000-0000-000000000000', 'Default', 'default')
+ON CONFLICT (id) DO NOTHING;
 
--- Enable RLS
-ALTER TABLE dashboards ENABLE ROW LEVEL SECURITY;
-ALTER TABLE panels ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
+-- 2. Add tenant_id (with default for backfill, then drop the default)
+DO $$
+DECLARE
+    t TEXT;
+    tables TEXT[] := ARRAY[
+        'datasources',
+        'dashboards',
+        'panels',
+        'alert_rules',
+        'alert_events',
+        'user_preferences',
+        'explore_history'
+    ];
+BEGIN
+    FOREACH t IN ARRAY tables LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = t AND column_name = 'tenant_id'
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE %I ADD COLUMN tenant_id UUID NOT NULL
+                 DEFAULT ''00000000-0000-0000-0000-000000000000''
+                 REFERENCES tenants(id) ON DELETE CASCADE',
+                t
+            );
+            EXECUTE format('ALTER TABLE %I ALTER COLUMN tenant_id DROP DEFAULT', t);
+        END IF;
+    END LOOP;
+END $$;
 
--- Create Policies
-CREATE POLICY tenant_isolation_dashboards ON dashboards USING (tenant_id = current_setting('app.tenant_id')::UUID);
-CREATE POLICY tenant_isolation_panels ON panels USING (tenant_id = current_setting('app.tenant_id')::UUID);
-CREATE POLICY tenant_isolation_alerts ON alerts USING (tenant_id = current_setting('app.tenant_id')::UUID);
+-- 3. Enable RLS and create policies (drop-then-create for idempotency)
+DO $$
+DECLARE
+    t TEXT;
+    tables TEXT[] := ARRAY[
+        'datasources',
+        'dashboards',
+        'panels',
+        'alert_rules',
+        'alert_events',
+        'user_preferences',
+        'explore_history'
+    ];
+BEGIN
+    FOREACH t IN ARRAY tables LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+        EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_%I ON %I', t, t);
+        EXECUTE format(
+            'CREATE POLICY tenant_isolation_%I ON %I
+             USING (tenant_id = current_setting(''app.tenant_id'')::UUID)
+             WITH CHECK (tenant_id = current_setting(''app.tenant_id'')::UUID)',
+            t, t
+        );
+    END LOOP;
+END $$;
+
+-- 4. Composite indexes for tenant-prefixed access patterns
+CREATE INDEX IF NOT EXISTS idx_dashboards_tenant_slug
+    ON dashboards (tenant_id, slug);
+CREATE INDEX IF NOT EXISTS idx_panels_tenant_dashboard
+    ON panels (tenant_id, dashboard_id);
+CREATE INDEX IF NOT EXISTS idx_datasources_tenant_default
+    ON datasources (tenant_id, is_default);
+CREATE INDEX IF NOT EXISTS idx_alert_rules_tenant_active
+    ON alert_rules (tenant_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_alert_events_tenant_created
+    ON alert_events (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_explore_history_tenant_created
+    ON explore_history (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_preferences_tenant
+    ON user_preferences (tenant_id);
+
+-- 5. Drop now-redundant single-column indexes
+DROP INDEX IF EXISTS idx_panels_dashboard_id;
+DROP INDEX IF EXISTS idx_alert_events_created_at;
+DROP INDEX IF EXISTS idx_explore_history_created_at;
+
+COMMIT;
