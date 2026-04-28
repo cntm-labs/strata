@@ -3,8 +3,6 @@
 -- tenant-owned table, and the composite indexes the new query plans need.
 -- Idempotent: safe to re-run after a partial earlier attempt.
 
-BEGIN;
-
 -- 1. Tenant registry
 CREATE TABLE IF NOT EXISTS tenants (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -19,6 +17,11 @@ VALUES ('00000000-0000-0000-0000-000000000000', 'Default', 'default')
 ON CONFLICT (id) DO NOTHING;
 
 -- 2. Add tenant_id (with default for backfill, then drop the default)
+-- TODO(prod): on populated tables this holds ACCESS EXCLUSIVE during FK
+--             validation. For the first production deploy, replace with the
+--             online variant: ADD COLUMN NULL; backfill in batches;
+--             ADD CONSTRAINT ... NOT VALID; VALIDATE CONSTRAINT;
+--             ADD CHECK (tenant_id IS NOT NULL) NOT VALID; VALIDATE; SET NOT NULL.
 DO $$
 DECLARE
     t TEXT;
@@ -64,6 +67,7 @@ DECLARE
 BEGIN
     FOREACH t IN ARRAY tables LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
         EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_%I ON %I', t, t);
         EXECUTE format(
             'CREATE POLICY tenant_isolation_%I ON %I
@@ -94,5 +98,3 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_tenant
 DROP INDEX IF EXISTS idx_panels_dashboard_id;
 DROP INDEX IF EXISTS idx_alert_events_created_at;
 DROP INDEX IF EXISTS idx_explore_history_created_at;
-
-COMMIT;
