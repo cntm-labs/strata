@@ -471,11 +471,10 @@ mod tests {
             .execute(&mut *tx)
             .await
             .unwrap();
-        let names: Vec<String> =
-            sqlx::query_scalar("SELECT name FROM datasources ORDER BY name")
-                .fetch_all(&mut *tx)
-                .await
-                .unwrap();
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM datasources ORDER BY name")
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
         assert_eq!(names, vec!["promA".to_string()]);
     }
 

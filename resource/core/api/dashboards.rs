@@ -434,11 +434,10 @@ mod tests {
             .execute(&mut *tx)
             .await
             .unwrap();
-        let titles: Vec<String> =
-            sqlx::query_scalar("SELECT title FROM dashboards ORDER BY title")
-                .fetch_all(&mut *tx)
-                .await
-                .unwrap();
+        let titles: Vec<String> = sqlx::query_scalar("SELECT title FROM dashboards ORDER BY title")
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
         assert_eq!(titles, vec!["A-board".to_string()]);
     }
 }

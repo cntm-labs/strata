@@ -98,7 +98,10 @@ mod tests {
                     resend_api_key: None,
                     alert_from_email: "test@test.com".into(),
                 },
-                notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+                notifier: std::sync::Arc::new(crate::notifier::Notifier::new(
+                    None,
+                    "test@test.com",
+                )),
             })
     }
 
@@ -290,12 +293,11 @@ mod tests {
             .execute(&mut *tx)
             .await
             .unwrap();
-        let row: Option<(Uuid,)> =
-            sqlx::query_as("SELECT id FROM datasources WHERE id = $1")
-                .bind(ds_a)
-                .fetch_optional(&mut *tx)
-                .await
-                .unwrap();
+        let row: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM datasources WHERE id = $1")
+            .bind(ds_a)
+            .fetch_optional(&mut *tx)
+            .await
+            .unwrap();
         assert!(row.is_none(), "tenant B must not see tenant A's datasource");
     }
 
