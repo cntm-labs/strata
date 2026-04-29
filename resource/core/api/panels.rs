@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::Path,
     routing::get,
     Json, Router,
 };
@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
 use uuid::Uuid;
 
+use crate::db::TenantTx;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 
@@ -55,7 +56,7 @@ pub fn panel_routes_nested() -> Router<AppState> {
 }
 
 async fn list_by_dashboard(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(slug): Path<String>,
 ) -> AppResult<Json<Vec<Panel>>> {
     let rows = sqlx::query_as::<_, Panel>(
@@ -65,27 +66,30 @@ async fn list_by_dashboard(
          ORDER BY p.created_at",
     )
     .bind(&slug)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(rows))
 }
 
 async fn create_for_dashboard(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(slug): Path<String>,
     Json(input): Json<CreatePanel>,
 ) -> AppResult<Json<Panel>> {
+    let tenant_id = tx.tenant_id();
     let dashboard_id = sqlx::query_scalar::<_, Uuid>("SELECT id FROM dashboards WHERE slug = $1")
         .bind(&slug)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
 
     let row = sqlx::query_as::<_, Panel>(
-        "INSERT INTO panels (dashboard_id, title, type, datasource_id, query, config, position)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "INSERT INTO panels (tenant_id, dashboard_id, title, type, datasource_id, query, config, position)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *",
     )
+    .bind(tenant_id)
     .bind(dashboard_id)
     .bind(&input.title)
     .bind(&input.panel_type)
@@ -93,13 +97,14 @@ async fn create_for_dashboard(
     .bind(&input.query)
     .bind(input.config.as_ref().unwrap_or(&serde_json::json!({})))
     .bind(&input.position)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
 async fn update(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(id): Path<Uuid>,
     Json(input): Json<UpdatePanel>,
 ) -> AppResult<Json<Panel>> {
@@ -118,17 +123,19 @@ async fn update(
     .bind(&input.query)
     .bind(&input.config)
     .bind(&input.position)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Panel not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
-async fn remove(State(state): State<AppState>, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
+async fn remove(mut tx: TenantTx, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM panels WHERE id = $1")
         .bind(id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(()))
 }
 
@@ -139,6 +146,9 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    /// UUID injected by `inject_mock_tenant` middleware in tests.
+    const MOCK_TENANT: Uuid = Uuid::from_u128(0);
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
@@ -154,7 +164,11 @@ mod tests {
             },
             notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
-        panel_routes_nested().with_state(state)
+        panel_routes_nested()
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state)
     }
 
     async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
@@ -173,8 +187,10 @@ mod tests {
 
     async fn seed_dashboard(pool: &sqlx::PgPool) -> Uuid {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO dashboards (title, slug) VALUES ('Test', 'test-dash') RETURNING id",
+            "INSERT INTO dashboards (title, slug, tenant_id) \
+             VALUES ('Test', 'test-dash', $1) RETURNING id",
         )
+        .bind(MOCK_TENANT)
         .fetch_one(pool)
         .await
         .unwrap()
@@ -323,7 +339,6 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        // Verify empty
         let app = test_app(pool);
         let resp = app
             .oneshot(
@@ -358,5 +373,52 @@ mod tests {
         let created: Panel = body_json(resp).await;
         assert_eq!(created.config["min"], 0);
         assert_eq!(created.config["max"], 100);
+    }
+
+    #[sqlx::test]
+    async fn panels_visible_only_in_owning_tenant(pool: sqlx::PgPool) {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, 'A', $2), ($3, 'B', $4)")
+            .bind(a)
+            .bind(format!("a-{}", a))
+            .bind(b)
+            .bind(format!("b-{}", b))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let dash_a: Uuid = sqlx::query_scalar(
+            "INSERT INTO dashboards (title, slug, layout, tenant_id) \
+             VALUES ('A','a','[]'::jsonb,$1) RETURNING id",
+        )
+        .bind(a)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO panels (dashboard_id, title, type, query, position, tenant_id) \
+             VALUES ($1, 'P', 'stat', '', '{}'::jsonb, $2)",
+        )
+        .bind(dash_a)
+        .bind(a)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL ROLE strata_app")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+            .bind(b.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM panels")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0, "tenant B must not see tenant A panels");
     }
 }
