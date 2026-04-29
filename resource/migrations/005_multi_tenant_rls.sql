@@ -105,11 +105,16 @@ DROP INDEX IF EXISTS idx_explore_history_created_at;
 -- TODO(prod): point the app's DATABASE_URL at strata_app once a password is
 --             set for it; until then production still runs as the migration
 --             role and tenant isolation is NOT enforced at the DB layer.
+-- Race-safe: when sqlx::test runs migrations in parallel against multiple
+-- fresh databases, the SELECT-then-CREATE pattern is non-atomic and two
+-- workers can both decide to CREATE, with the second one losing on the
+-- pg_authid_rolname_index uniqueness constraint. Catch duplicate_object
+-- (SQLSTATE 42710) and swallow it.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'strata_app') THEN
-        CREATE ROLE strata_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
-    END IF;
+    CREATE ROLE strata_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
 END $$;
 GRANT USAGE ON SCHEMA public TO strata_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO strata_app;
