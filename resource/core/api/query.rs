@@ -1,13 +1,10 @@
-use axum::{
-    extract::{Path, State},
-    Json,
-};
+use axum::{extract::Path, Json};
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::datasource::{loki::LokiClient, postgresql, prometheus::PrometheusClient};
+use crate::db::TenantTx;
 use crate::error::{AppError, AppResult};
-use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct QueryRequest {
@@ -19,7 +16,7 @@ pub struct QueryRequest {
 }
 
 pub async fn proxy_query(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(id): Path<Uuid>,
     Json(input): Json<QueryRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -27,9 +24,13 @@ pub async fn proxy_query(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
+
+    // Commit the (read-only) transaction before doing the network proxy so we
+    // don't hold a Postgres connection for the duration of the outbound call.
+    tx.commit().await?;
 
     let result = match ds.ds_type.as_str() {
         "prometheus" => {
@@ -78,21 +79,27 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    const MOCK_TENANT: Uuid = Uuid::from_u128(0);
+
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         // Mount via datasource routes since query is nested under /{id}/query
-        crate::api::datasources::datasource_routes().with_state(crate::AppState {
-            pool: db,
-            config: crate::config::AppConfig {
-                database_url: String::new(),
-                host: "127.0.0.1".into(),
-                port: 3000,
-                nucleus_secret_key: None,
-                nucleus_base_url: None,
-                resend_api_key: None,
-                alert_from_email: "test@test.com".into(),
-            },
-            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
-        })
+        crate::api::datasources::datasource_routes()
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(crate::AppState {
+                pool: db,
+                config: crate::config::AppConfig {
+                    database_url: String::new(),
+                    host: "127.0.0.1".into(),
+                    port: 3000,
+                    nucleus_secret_key: None,
+                    nucleus_base_url: None,
+                    resend_api_key: None,
+                    alert_from_email: "test@test.com".into(),
+                },
+                notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+            })
     }
 
     fn json_request(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -106,11 +113,12 @@ mod tests {
 
     async fn seed_ds(pool: &sqlx::PgPool, ds_type: &str, url: &str) -> Uuid {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ($1, $2, $3) RETURNING id",
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ($1, $2, $3, $4) RETURNING id",
         )
         .bind(format!("Test {}", ds_type))
         .bind(ds_type)
         .bind(url)
+        .bind(MOCK_TENANT)
         .fetch_one(pool)
         .await
         .unwrap()
@@ -249,6 +257,46 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[sqlx::test]
+    async fn proxy_query_404s_for_other_tenant_datasource(pool: sqlx::PgPool) {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1,'A',$2),($3,'B',$4)")
+            .bind(a)
+            .bind(format!("a-{}", a))
+            .bind(b)
+            .bind(format!("b-{}", b))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ds_a: Uuid = sqlx::query_scalar(
+            "INSERT INTO datasources (name, type, url, tenant_id) \
+             VALUES ('p','prometheus','http://x',$1) RETURNING id",
+        )
+        .bind(a)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL ROLE strata_app")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+            .bind(b.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let row: Option<(Uuid,)> =
+            sqlx::query_as("SELECT id FROM datasources WHERE id = $1")
+                .bind(ds_a)
+                .fetch_optional(&mut *tx)
+                .await
+                .unwrap();
+        assert!(row.is_none(), "tenant B must not see tenant A's datasource");
     }
 
     #[sqlx::test]
