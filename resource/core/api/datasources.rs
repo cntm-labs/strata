@@ -1,11 +1,12 @@
 use axum::{
-    extract::{Path, State},
+    extract::Path,
     routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::db::TenantTx;
 use crate::error::AppResult;
 use crate::AppState;
 
@@ -48,47 +49,49 @@ pub fn datasource_routes() -> Router<AppState> {
         .route("/{id}/query", post(super::query::proxy_query))
 }
 
-async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<Datasource>>> {
+async fn list(mut tx: TenantTx) -> AppResult<Json<Vec<Datasource>>> {
     let rows =
         sqlx::query_as::<_, Datasource>("SELECT * FROM datasources ORDER BY created_at DESC")
-            .fetch_all(&state.pool)
+            .fetch_all(&mut *tx)
             .await?;
+    tx.commit().await?;
     Ok(Json(rows))
 }
 
 async fn create(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Json(input): Json<CreateDatasource>,
 ) -> AppResult<Json<Datasource>> {
+    let tenant_id = tx.tenant_id();
     let row = sqlx::query_as::<_, Datasource>(
-        "INSERT INTO datasources (name, type, url, credentials_enc, is_default)
-         VALUES ($1, $2, $3, $4, $5)
+        "INSERT INTO datasources (tenant_id, name, type, url, credentials_enc, is_default)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *",
     )
+    .bind(tenant_id)
     .bind(&input.name)
     .bind(&input.ds_type)
     .bind(&input.url)
     .bind(&input.credentials)
     .bind(input.is_default.unwrap_or(false))
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> AppResult<Json<Datasource>> {
+async fn get_one(mut tx: TenantTx, Path(id): Path<Uuid>) -> AppResult<Json<Datasource>> {
     let row = sqlx::query_as::<_, Datasource>("SELECT * FROM datasources WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| crate::error::AppError::NotFound("Datasource not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
 async fn update(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateDatasource>,
 ) -> AppResult<Json<Datasource>> {
@@ -106,29 +109,32 @@ async fn update(
     .bind(&input.url)
     .bind(&input.credentials)
     .bind(input.is_default)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| crate::error::AppError::NotFound("Datasource not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
-async fn remove(State(state): State<AppState>, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
+async fn remove(mut tx: TenantTx, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM datasources WHERE id = $1")
         .bind(id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(()))
 }
 
 async fn test_connection(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let ds = sqlx::query_as::<_, Datasource>("SELECT * FROM datasources WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| crate::error::AppError::NotFound("Datasource not found".into()))?;
+    tx.commit().await?;
 
     let ok = match ds.ds_type.as_str() {
         "prometheus" => reqwest::get(format!("{}/-/healthy", ds.url))
@@ -173,7 +179,11 @@ mod tests {
             },
             notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
-        datasource_routes().with_state(state)
+        datasource_routes()
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state)
     }
 
     async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
@@ -426,6 +436,47 @@ mod tests {
             .unwrap();
         let result: serde_json::Value = body_json(resp).await;
         assert_eq!(result["success"], true);
+    }
+
+    #[sqlx::test]
+    async fn datasources_isolated_by_tenant(pool: sqlx::PgPool) {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1,'A',$2),($3,'B',$4)")
+            .bind(a)
+            .bind(format!("a-{}", a))
+            .bind(b)
+            .bind(format!("b-{}", b))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO datasources (name, type, url, tenant_id) \
+             VALUES ('promA','prometheus','http://a',$1), \
+                    ('promB','prometheus','http://b',$2)",
+        )
+        .bind(a)
+        .bind(b)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL ROLE strata_app")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+            .bind(a.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let names: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM datasources ORDER BY name")
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(names, vec!["promA".to_string()]);
     }
 
     #[sqlx::test]
