@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgConnection, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -30,7 +30,7 @@ impl TenantTx {
 }
 
 impl Deref for TenantTx {
-    type Target = Transaction<'static, Postgres>;
+    type Target = PgConnection;
     fn deref(&self) -> &Self::Target {
         &self.tx
     }

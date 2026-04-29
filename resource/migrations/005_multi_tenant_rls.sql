@@ -98,3 +98,23 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_tenant
 DROP INDEX IF EXISTS idx_panels_dashboard_id;
 DROP INDEX IF EXISTS idx_alert_events_created_at;
 DROP INDEX IF EXISTS idx_explore_history_created_at;
+
+-- 6. Application role for runtime queries.
+-- The migration role is typically a SUPERUSER, and superusers bypass RLS even
+-- with FORCE — so the runtime app must connect as a non-super, non-bypass role.
+-- TODO(prod): point the app's DATABASE_URL at strata_app once a password is
+--             set for it; until then production still runs as the migration
+--             role and tenant isolation is NOT enforced at the DB layer.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'strata_app') THEN
+        CREATE ROLE strata_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
+    END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO strata_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO strata_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO strata_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO strata_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO strata_app;
