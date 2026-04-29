@@ -93,6 +93,132 @@ impl FromRequestParts<AppState> for TenantTx {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    // Shared dummy handler for the negative extractor tests. Returns 200 only
+    // if the extractor succeeds; both tests below expect the extractor to fail
+    // before this body runs, so reaching it would itself be the failure mode.
+    async fn extractor_probe_handler(_tx: TenantTx) -> &'static str {
+        "ok"
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn extractor_returns_500_when_tenant_extension_missing(pool: sqlx::PgPool) {
+        // Mount a route that uses TenantTx but does NOT install the mock-tenant
+        // middleware. The extractor must observe the missing TenantId and reject
+        // the request with 500.
+        let state = crate::AppState {
+            pool,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_secret_key: None,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
+        let app: Router = Router::new()
+            .route("/x", get(extractor_probe_handler))
+            .with_state(state);
+        let resp = app
+            .oneshot(Request::get("/x").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn missing_tenant_error_renders_500() {
+        let resp = TenantTxError::MissingTenant.into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn sqlx_error_renders_500() {
+        let resp = TenantTxError::Sqlx(sqlx::Error::PoolTimedOut).into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deref_exposes_inner_connection(pool: sqlx::PgPool) {
+        // The Deref impl is dead at runtime (handlers always use &mut *tx),
+        // but it's a required supertrait of DerefMut. Exercise it once so the
+        // coverage tool sees a call site.
+        let tx = pool.begin().await.unwrap();
+        let tenant_tx = TenantTx {
+            tenant_id: Uuid::nil(),
+            tx,
+        };
+        let _: &PgConnection = &*tenant_tx;
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn extractor_succeeds_with_mock_tenant(pool: sqlx::PgPool) {
+        // Positive path through the extractor — also covers the probe handler
+        // body so coverage on it isn't a phantom.
+        let state = crate::AppState {
+            pool,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_secret_key: None,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
+        let app: Router = Router::new()
+            .route("/x", get(extractor_probe_handler))
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state);
+        let resp = app
+            .oneshot(Request::get("/x").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn extractor_returns_500_when_pool_is_closed(pool: sqlx::PgPool) {
+        // Close the pool BEFORE the extractor runs so pool.begin() fails and
+        // the Sqlx error path of from_request_parts is exercised.
+        let state = crate::AppState {
+            pool: pool.clone(),
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_secret_key: None,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
+        let app: Router = Router::new()
+            .route("/x", get(extractor_probe_handler))
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state);
+        pool.close().await;
+        let resp = app
+            .oneshot(Request::get("/x").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn set_config_uses_parameter_binding(pool: sqlx::PgPool) {
