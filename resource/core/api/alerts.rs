@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
 use uuid::Uuid;
 
+use crate::db::TenantTx;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 
@@ -84,22 +85,25 @@ pub fn alert_routes() -> Router<AppState> {
         .route("/events", get(list_events))
 }
 
-async fn list_rules(State(state): State<AppState>) -> AppResult<Json<Vec<AlertRule>>> {
+async fn list_rules(mut tx: TenantTx) -> AppResult<Json<Vec<AlertRule>>> {
     let rows = sqlx::query_as::<_, AlertRule>("SELECT * FROM alert_rules ORDER BY created_at DESC")
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(rows))
 }
 
 async fn create_rule(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Json(input): Json<CreateAlertRule>,
 ) -> AppResult<Json<AlertRule>> {
+    let tenant_id = tx.tenant_id();
     let row = sqlx::query_as::<_, AlertRule>(
-        "INSERT INTO alert_rules (name, datasource_id, query, condition, threshold, duration_secs, severity, notification_channels, notification_recipients)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        "INSERT INTO alert_rules (tenant_id, name, datasource_id, query, condition, threshold, duration_secs, severity, notification_channels, notification_recipients)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *",
     )
+    .bind(tenant_id)
     .bind(&input.name)
     .bind(input.datasource_id)
     .bind(&input.query)
@@ -109,25 +113,24 @@ async fn create_rule(
     .bind(input.severity.as_deref().unwrap_or("warning"))
     .bind(&input.notification_channels)
     .bind(&input.notification_recipients)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
-async fn get_rule(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> AppResult<Json<AlertRule>> {
+async fn get_rule(mut tx: TenantTx, Path(id): Path<Uuid>) -> AppResult<Json<AlertRule>> {
     let row = sqlx::query_as::<_, AlertRule>("SELECT * FROM alert_rules WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("Alert rule not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
 async fn update_rule(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateAlertRule>,
 ) -> AppResult<Json<AlertRule>> {
@@ -156,27 +159,31 @@ async fn update_rule(
     .bind(&input.notification_channels)
     .bind(&input.notification_recipients)
     .bind(input.is_active)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Alert rule not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
-async fn delete_rule(State(state): State<AppState>, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
+async fn delete_rule(mut tx: TenantTx, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM alert_rules WHERE id = $1")
         .bind(id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(()))
 }
 
 async fn test_fire_rule(
     State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<AlertEvent>> {
+    let tenant_id = tx.tenant_id();
     let rule = sqlx::query_as::<_, AlertRule>("SELECT * FROM alert_rules WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("Alert rule not found".into()))?;
 
@@ -184,7 +191,7 @@ async fn test_fire_rule(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(rule.datasource_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
 
@@ -218,9 +225,10 @@ async fn test_fire_rule(
 
     let state_str = if firing { "firing" } else { "ok" };
     let event = sqlx::query_as::<_, AlertEvent>(
-        "INSERT INTO alert_events (rule_id, state, value, message)
-         VALUES ($1, $2, $3, $4) RETURNING *",
+        "INSERT INTO alert_events (tenant_id, rule_id, state, value, message)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *",
     )
+    .bind(tenant_id)
     .bind(rule.id)
     .bind(state_str)
     .bind(val)
@@ -228,8 +236,9 @@ async fn test_fire_rule(
         "Test fire: {} = {:.2}, threshold {:.2} ({})",
         rule.query, val, rule.threshold, rule.condition
     ))
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     if firing {
         let email_recipients: Vec<String> = rule
@@ -265,7 +274,7 @@ async fn test_fire_rule(
 }
 
 async fn list_events(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Query(params): Query<EventsQuery>,
 ) -> AppResult<Json<Vec<AlertEvent>>> {
     let limit = params.limit.unwrap_or(100);
@@ -276,16 +285,17 @@ async fn list_events(
         )
         .bind(rule_id)
         .bind(limit)
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await?
     } else {
         sqlx::query_as::<_, AlertEvent>(
             "SELECT * FROM alert_events ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await?
     };
+    tx.commit().await?;
 
     Ok(Json(rows))
 }
@@ -312,8 +322,14 @@ mod tests {
             },
             notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
-        alert_routes().with_state(state)
+        alert_routes()
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state)
     }
+
+    const MOCK_TENANT: Uuid = Uuid::from_u128(0);
 
     async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -331,8 +347,9 @@ mod tests {
 
     async fn seed_datasource(pool: &sqlx::PgPool) -> Uuid {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ('Test', 'prometheus', 'http://prom:9090') RETURNING id"
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ('Test', 'prometheus', 'http://prom:9090', $1) RETURNING id"
         )
+        .bind(MOCK_TENANT)
         .fetch_one(pool)
         .await
         .unwrap()
@@ -496,12 +513,13 @@ mod tests {
         let rule = create_rule_helper(&pool, ds_id, "Rule1").await;
 
         sqlx::query(
-            "INSERT INTO alert_events (rule_id, state, value, message) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO alert_events (rule_id, state, value, message, tenant_id) VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(rule.id)
         .bind("firing")
         .bind(1.5_f64)
         .bind("CPU high")
+        .bind(MOCK_TENANT)
         .execute(&pool)
         .await
         .unwrap();
@@ -546,9 +564,10 @@ mod tests {
             .await;
 
         let ds_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', $1) RETURNING id",
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ('Prom', 'prometheus', $1, $2) RETURNING id",
         )
         .bind(mock.uri())
+        .bind(MOCK_TENANT)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -648,9 +667,10 @@ mod tests {
             .await;
 
         let ds_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', $1) RETURNING id",
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ('Prom', 'prometheus', $1, $2) RETURNING id",
         )
         .bind(mock.uri())
+        .bind(MOCK_TENANT)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -693,8 +713,9 @@ mod tests {
     #[sqlx::test]
     async fn test_fire_non_prometheus_datasource(pool: sqlx::PgPool) {
         let ds_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ('PG', 'postgresql', 'postgres://localhost') RETURNING id",
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ('PG', 'postgresql', 'postgres://localhost', $1) RETURNING id",
         )
+        .bind(MOCK_TENANT)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -736,6 +757,54 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn alert_rules_isolated_by_tenant(pool: sqlx::PgPool) {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1,'A',$2),($3,'B',$4)")
+            .bind(a)
+            .bind(format!("a-{}", a))
+            .bind(b)
+            .bind(format!("b-{}", b))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ds_a: Uuid = sqlx::query_scalar(
+            "INSERT INTO datasources (name, type, url, tenant_id) \
+             VALUES ('p','prometheus','http://x',$1) RETURNING id",
+        )
+        .bind(a)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO alert_rules (name, datasource_id, query, condition, threshold, \
+             notification_channels, notification_recipients, tenant_id) \
+             VALUES ('r', $1, 'up', 'gt', 0, '[]'::jsonb, '[]'::jsonb, $2)",
+        )
+        .bind(ds_a)
+        .bind(a)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL ROLE strata_app")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+            .bind(b.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM alert_rules")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0, "tenant B must not see tenant A alert rules");
+    }
+
+    #[sqlx::test]
     async fn test_fire_condition_branches(pool: sqlx::PgPool) {
         let mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("GET"))
@@ -752,9 +821,10 @@ mod tests {
             .await;
 
         let ds_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', $1) RETURNING id",
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ('Prom', 'prometheus', $1, $2) RETURNING id",
         )
         .bind(mock.uri())
+        .bind(MOCK_TENANT)
         .fetch_one(&pool)
         .await
         .unwrap();
