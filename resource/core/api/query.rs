@@ -27,7 +27,7 @@ pub async fn proxy_query(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
 
@@ -81,7 +81,7 @@ mod tests {
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         // Mount via datasource routes since query is nested under /{id}/query
         crate::api::datasources::datasource_routes().with_state(crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),

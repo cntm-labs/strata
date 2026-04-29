@@ -57,7 +57,7 @@ async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<Dashboard>>> 
     let rows = sqlx::query_as::<_, Dashboard>(
         "SELECT * FROM dashboards ORDER BY is_starred DESC, updated_at DESC",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&state.pool)
     .await?;
     Ok(Json(rows))
 }
@@ -77,7 +77,7 @@ async fn create(
     .bind(input.time_range.as_deref().unwrap_or("1h"))
     .bind(input.refresh_interval.unwrap_or(0))
     .bind(&input.variables)
-    .fetch_one(&state.db)
+    .fetch_one(&state.pool)
     .await?;
     Ok(Json(row))
 }
@@ -88,7 +88,7 @@ async fn get_one(
 ) -> AppResult<Json<Dashboard>> {
     let row = sqlx::query_as::<_, Dashboard>("SELECT * FROM dashboards WHERE slug = $1")
         .bind(&slug)
-        .fetch_optional(&state.db)
+        .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
     Ok(Json(row))
@@ -118,7 +118,7 @@ async fn update(
     .bind(&input.time_range)
     .bind(input.refresh_interval)
     .bind(&input.variables)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
     Ok(Json(row))
@@ -127,7 +127,7 @@ async fn update(
 async fn remove(State(state): State<AppState>, Path(slug): Path<String>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM dashboards WHERE slug = $1")
         .bind(&slug)
-        .execute(&state.db)
+        .execute(&state.pool)
         .await?;
     Ok(Json(()))
 }
@@ -141,7 +141,7 @@ async fn toggle_star(
          WHERE slug = $1 RETURNING *",
     )
     .bind(&slug)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
     Ok(Json(row))
@@ -157,7 +157,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),

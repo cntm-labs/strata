@@ -65,7 +65,7 @@ async fn list_by_dashboard(
          ORDER BY p.created_at",
     )
     .bind(&slug)
-    .fetch_all(&state.db)
+    .fetch_all(&state.pool)
     .await?;
     Ok(Json(rows))
 }
@@ -77,7 +77,7 @@ async fn create_for_dashboard(
 ) -> AppResult<Json<Panel>> {
     let dashboard_id = sqlx::query_scalar::<_, Uuid>("SELECT id FROM dashboards WHERE slug = $1")
         .bind(&slug)
-        .fetch_optional(&state.db)
+        .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
 
@@ -93,7 +93,7 @@ async fn create_for_dashboard(
     .bind(&input.query)
     .bind(input.config.as_ref().unwrap_or(&serde_json::json!({})))
     .bind(&input.position)
-    .fetch_one(&state.db)
+    .fetch_one(&state.pool)
     .await?;
     Ok(Json(row))
 }
@@ -118,7 +118,7 @@ async fn update(
     .bind(&input.query)
     .bind(&input.config)
     .bind(&input.position)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Panel not found".into()))?;
     Ok(Json(row))
@@ -127,7 +127,7 @@ async fn update(
 async fn remove(State(state): State<AppState>, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM panels WHERE id = $1")
         .bind(id)
-        .execute(&state.db)
+        .execute(&state.pool)
         .await?;
     Ok(Json(()))
 }
@@ -142,7 +142,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),

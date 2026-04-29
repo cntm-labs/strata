@@ -41,7 +41,7 @@ async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<DashboardTemp
     let rows = sqlx::query_as::<_, DashboardTemplate>(
         "SELECT * FROM dashboard_templates WHERE is_active = true ORDER BY category, name",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&state.pool)
     .await?;
     Ok(Json(rows))
 }
@@ -54,7 +54,7 @@ async fn use_template(
     let template =
         sqlx::query_as::<_, DashboardTemplate>("SELECT * FROM dashboard_templates WHERE slug = $1")
             .bind(&template_slug)
-            .fetch_optional(&state.db)
+            .fetch_optional(&state.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Template not found".into()))?;
 
@@ -68,7 +68,7 @@ async fn use_template(
     .bind(&input.slug)
     .bind(&template.description)
     .bind(serde_json::json!([]))
-    .fetch_one(&state.db)
+    .fetch_one(&state.pool)
     .await?;
 
     // Create panels from template JSON
@@ -112,7 +112,7 @@ async fn use_template(
                     .get("position")
                     .unwrap_or(&serde_json::json!({"x":0,"y":0,"w":6,"h":3})),
             )
-            .execute(&state.db)
+            .execute(&state.pool)
             .await?;
         }
     }
@@ -130,7 +130,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),

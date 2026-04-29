@@ -1,25 +1,11 @@
-use axum::{
-    extract::{Request, State},
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, middleware::Next, response::Response};
+use uuid::Uuid;
 
-use crate::AppState;
+use crate::db::TenantId;
 
-pub async fn set_tenant_context(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
-    // For now, we use a mock tenant ID. 
-    // In a real application, this might be extracted from NucleusClaims or a header.
-    let tenant_id = "00000000-0000-0000-0000-000000000000";
+const MOCK_TENANT_ID: Uuid = Uuid::from_u128(0);
 
-    // Set the tenant_id in the PostgreSQL session.
-    // This allows Row Level Security (RLS) to use this variable.
-    let _ = sqlx::query(&format!("SET app.tenant_id = '{}'", tenant_id))
-        .execute(&state.db)
-        .await;
-
+pub async fn inject_mock_tenant(mut req: Request, next: Next) -> Response {
+    req.extensions_mut().insert(TenantId(MOCK_TENANT_ID));
     next.run(req).await
 }

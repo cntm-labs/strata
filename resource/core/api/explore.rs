@@ -50,7 +50,7 @@ async fn explore_query(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(input.datasource_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
 
@@ -62,7 +62,7 @@ async fn explore_query(
     .bind(input.datasource_id)
     .bind(&input.query)
     .bind(&query_type)
-    .execute(&state.db)
+    .execute(&state.pool)
     .await?;
 
     // Execute query via proxy
@@ -114,14 +114,14 @@ async fn list_history(
         )
         .bind(ds_id)
         .bind(limit)
-        .fetch_all(&state.db)
+        .fetch_all(&state.pool)
         .await?
     } else {
         sqlx::query_as::<_, ExploreHistory>(
             "SELECT * FROM explore_history ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)
-        .fetch_all(&state.db)
+        .fetch_all(&state.pool)
         .await?
     };
 
@@ -136,7 +136,7 @@ async fn label_values(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(datasource_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
 
@@ -182,7 +182,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),

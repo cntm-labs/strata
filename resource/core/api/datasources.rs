@@ -51,7 +51,7 @@ pub fn datasource_routes() -> Router<AppState> {
 async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<Datasource>>> {
     let rows =
         sqlx::query_as::<_, Datasource>("SELECT * FROM datasources ORDER BY created_at DESC")
-            .fetch_all(&state.db)
+            .fetch_all(&state.pool)
             .await?;
     Ok(Json(rows))
 }
@@ -70,7 +70,7 @@ async fn create(
     .bind(&input.url)
     .bind(&input.credentials)
     .bind(input.is_default.unwrap_or(false))
-    .fetch_one(&state.db)
+    .fetch_one(&state.pool)
     .await?;
     Ok(Json(row))
 }
@@ -81,7 +81,7 @@ async fn get_one(
 ) -> AppResult<Json<Datasource>> {
     let row = sqlx::query_as::<_, Datasource>("SELECT * FROM datasources WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.db)
+        .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| crate::error::AppError::NotFound("Datasource not found".into()))?;
     Ok(Json(row))
@@ -106,7 +106,7 @@ async fn update(
     .bind(&input.url)
     .bind(&input.credentials)
     .bind(input.is_default)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| crate::error::AppError::NotFound("Datasource not found".into()))?;
     Ok(Json(row))
@@ -115,7 +115,7 @@ async fn update(
 async fn remove(State(state): State<AppState>, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM datasources WHERE id = $1")
         .bind(id)
-        .execute(&state.db)
+        .execute(&state.pool)
         .await?;
     Ok(Json(()))
 }
@@ -126,7 +126,7 @@ async fn test_connection(
 ) -> AppResult<Json<serde_json::Value>> {
     let ds = sqlx::query_as::<_, Datasource>("SELECT * FROM datasources WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.db)
+        .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| crate::error::AppError::NotFound("Datasource not found".into()))?;
 
@@ -161,7 +161,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),

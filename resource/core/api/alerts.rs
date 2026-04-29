@@ -86,7 +86,7 @@ pub fn alert_routes() -> Router<AppState> {
 
 async fn list_rules(State(state): State<AppState>) -> AppResult<Json<Vec<AlertRule>>> {
     let rows = sqlx::query_as::<_, AlertRule>("SELECT * FROM alert_rules ORDER BY created_at DESC")
-        .fetch_all(&state.db)
+        .fetch_all(&state.pool)
         .await?;
     Ok(Json(rows))
 }
@@ -109,7 +109,7 @@ async fn create_rule(
     .bind(input.severity.as_deref().unwrap_or("warning"))
     .bind(&input.notification_channels)
     .bind(&input.notification_recipients)
-    .fetch_one(&state.db)
+    .fetch_one(&state.pool)
     .await?;
     Ok(Json(row))
 }
@@ -120,7 +120,7 @@ async fn get_rule(
 ) -> AppResult<Json<AlertRule>> {
     let row = sqlx::query_as::<_, AlertRule>("SELECT * FROM alert_rules WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.db)
+        .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Alert rule not found".into()))?;
     Ok(Json(row))
@@ -156,7 +156,7 @@ async fn update_rule(
     .bind(&input.notification_channels)
     .bind(&input.notification_recipients)
     .bind(input.is_active)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Alert rule not found".into()))?;
     Ok(Json(row))
@@ -165,7 +165,7 @@ async fn update_rule(
 async fn delete_rule(State(state): State<AppState>, Path(id): Path<Uuid>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM alert_rules WHERE id = $1")
         .bind(id)
-        .execute(&state.db)
+        .execute(&state.pool)
         .await?;
     Ok(Json(()))
 }
@@ -176,7 +176,7 @@ async fn test_fire_rule(
 ) -> AppResult<Json<AlertEvent>> {
     let rule = sqlx::query_as::<_, AlertRule>("SELECT * FROM alert_rules WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.db)
+        .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Alert rule not found".into()))?;
 
@@ -184,7 +184,7 @@ async fn test_fire_rule(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(rule.datasource_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
 
@@ -228,7 +228,7 @@ async fn test_fire_rule(
         "Test fire: {} = {:.2}, threshold {:.2} ({})",
         rule.query, val, rule.threshold, rule.condition
     ))
-    .fetch_one(&state.db)
+    .fetch_one(&state.pool)
     .await?;
 
     if firing {
@@ -276,14 +276,14 @@ async fn list_events(
         )
         .bind(rule_id)
         .bind(limit)
-        .fetch_all(&state.db)
+        .fetch_all(&state.pool)
         .await?
     } else {
         sqlx::query_as::<_, AlertEvent>(
             "SELECT * FROM alert_events ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)
-        .fetch_all(&state.db)
+        .fetch_all(&state.pool)
         .await?
     };
 
@@ -300,7 +300,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
