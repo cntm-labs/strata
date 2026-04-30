@@ -106,15 +106,17 @@ DROP INDEX IF EXISTS idx_explore_history_created_at;
 --             set for it; until then production still runs as the migration
 --             role and tenant isolation is NOT enforced at the DB layer.
 -- Race-safe: when sqlx::test runs migrations in parallel against multiple
--- fresh databases, the SELECT-then-CREATE pattern is non-atomic and two
--- workers can both decide to CREATE, with the second one losing on the
--- pg_authid_rolname_index uniqueness constraint. Catch duplicate_object
--- (SQLSTATE 42710) and swallow it.
+-- fresh databases, two workers can both decide to CREATE the cluster-wide
+-- role and one will lose. Postgres surfaces this either as
+-- duplicate_object (42710) when the high-level "role exists" check fires,
+-- or as unique_violation (23505) when concurrent CREATEs both pass the
+-- check and collide on pg_authid_rolname_index. Catch both.
 DO $$
 BEGIN
     CREATE ROLE strata_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
-EXCEPTION WHEN duplicate_object THEN
-    NULL;
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN unique_violation THEN NULL;
 END $$;
 GRANT USAGE ON SCHEMA public TO strata_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO strata_app;

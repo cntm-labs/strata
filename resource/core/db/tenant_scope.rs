@@ -156,7 +156,8 @@ mod tests {
             tenant_id: Uuid::nil(),
             tx,
         };
-        let _: &PgConnection = &*tenant_tx;
+        // Auto-deref coercion at the type ascription invokes Deref::deref.
+        let _: &PgConnection = &tenant_tx;
     }
 
     #[sqlx::test(migrations = "./migrations")]
