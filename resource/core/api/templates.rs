@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
 use uuid::Uuid;
 
+use crate::db::TenantTx;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 
@@ -41,34 +42,39 @@ async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<DashboardTemp
     let rows = sqlx::query_as::<_, DashboardTemplate>(
         "SELECT * FROM dashboard_templates WHERE is_active = true ORDER BY category, name",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&state.pool)
     .await?;
     Ok(Json(rows))
 }
 
 async fn use_template(
     State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(template_slug): Path<String>,
     Json(input): Json<UseTemplate>,
 ) -> AppResult<Json<super::dashboards::Dashboard>> {
+    // dashboard_templates is global (no RLS), so read it from the raw pool.
     let template =
         sqlx::query_as::<_, DashboardTemplate>("SELECT * FROM dashboard_templates WHERE slug = $1")
             .bind(&template_slug)
-            .fetch_optional(&state.db)
+            .fetch_optional(&state.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Template not found".into()))?;
 
+    let tenant_id = tx.tenant_id();
+
     // Create dashboard from template
     let dashboard = sqlx::query_as::<_, super::dashboards::Dashboard>(
-        "INSERT INTO dashboards (title, slug, description, layout)
-         VALUES ($1, $2, $3, $4)
+        "INSERT INTO dashboards (tenant_id, title, slug, description, layout)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *",
     )
+    .bind(tenant_id)
     .bind(&input.title)
     .bind(&input.slug)
     .bind(&template.description)
     .bind(serde_json::json!([]))
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
 
     // Create panels from template JSON
@@ -79,9 +85,10 @@ async fn use_template(
     if let Some(panels) = panels {
         for panel_json in panels {
             sqlx::query(
-                "INSERT INTO panels (dashboard_id, title, type, datasource_id, query, config, position)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "INSERT INTO panels (tenant_id, dashboard_id, title, type, datasource_id, query, config, position)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             )
+            .bind(tenant_id)
             .bind(dashboard.id)
             .bind(
                 panel_json
@@ -112,11 +119,12 @@ async fn use_template(
                     .get("position")
                     .unwrap_or(&serde_json::json!({"x":0,"y":0,"w":6,"h":3})),
             )
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
         }
     }
 
+    tx.commit().await?;
     Ok(Json(dashboard))
 }
 
@@ -130,7 +138,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
@@ -142,8 +150,14 @@ mod tests {
             },
             notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
-        template_routes().with_state(state)
+        template_routes()
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state)
     }
+
+    const MOCK_TENANT: Uuid = Uuid::from_u128(0);
 
     async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -342,8 +356,9 @@ mod tests {
     async fn use_template_with_datasource_id(pool: sqlx::PgPool) {
         seed_template(&pool).await;
         let ds_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ('Prom', 'prometheus', 'http://prom:9090') RETURNING id"
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ('Prom', 'prometheus', 'http://prom:9090', $1) RETURNING id"
         )
+        .bind(MOCK_TENANT)
         .fetch_one(&pool)
         .await
         .unwrap();

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query},
     routing::{get, post},
     Json, Router,
 };
@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::datasource::{loki::LokiClient, prometheus::PrometheusClient};
+use crate::db::TenantTx;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 
@@ -43,27 +44,34 @@ pub fn explore_routes() -> Router<AppState> {
 }
 
 async fn explore_query(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Json(input): Json<ExploreQueryRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
+    let tenant_id = tx.tenant_id();
     let ds = sqlx::query_as::<_, super::datasources::Datasource>(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(input.datasource_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
 
     // Save to history
     let query_type = ds.ds_type.clone();
     sqlx::query(
-        "INSERT INTO explore_history (datasource_id, query, query_type) VALUES ($1, $2, $3)",
+        "INSERT INTO explore_history (tenant_id, datasource_id, query, query_type) \
+         VALUES ($1, $2, $3, $4)",
     )
+    .bind(tenant_id)
     .bind(input.datasource_id)
     .bind(&input.query)
     .bind(&query_type)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+
+    // Commit before the outbound proxy call so we don't hold a Postgres connection
+    // during the (potentially slow) network round trip.
+    tx.commit().await?;
 
     // Execute query via proxy
     let result = match ds.ds_type.as_str() {
@@ -102,7 +110,7 @@ async fn explore_query(
 }
 
 async fn list_history(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Query(params): Query<HistoryQuery>,
 ) -> AppResult<Json<Vec<ExploreHistory>>> {
     let limit = params.limit.unwrap_or(50);
@@ -114,31 +122,33 @@ async fn list_history(
         )
         .bind(ds_id)
         .bind(limit)
-        .fetch_all(&state.db)
+        .fetch_all(&mut *tx)
         .await?
     } else {
         sqlx::query_as::<_, ExploreHistory>(
             "SELECT * FROM explore_history ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)
-        .fetch_all(&state.db)
+        .fetch_all(&mut *tx)
         .await?
     };
+    tx.commit().await?;
 
     Ok(Json(rows))
 }
 
 async fn label_values(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(datasource_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let ds = sqlx::query_as::<_, super::datasources::Datasource>(
         "SELECT * FROM datasources WHERE id = $1",
     )
     .bind(datasource_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Datasource not found".into()))?;
+    tx.commit().await?;
 
     let result = match ds.ds_type.as_str() {
         "prometheus" => {
@@ -182,7 +192,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
@@ -194,8 +204,14 @@ mod tests {
             },
             notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
-        explore_routes().with_state(state)
+        explore_routes()
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state)
     }
+
+    const MOCK_TENANT: Uuid = Uuid::from_u128(0);
 
     async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -213,11 +229,12 @@ mod tests {
 
     async fn seed_datasource(pool: &sqlx::PgPool, ds_type: &str, url: &str) -> Uuid {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO datasources (name, type, url) VALUES ($1, $2, $3) RETURNING id",
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ($1, $2, $3, $4) RETURNING id",
         )
         .bind(format!("Test {}", ds_type))
         .bind(ds_type)
         .bind(url)
+        .bind(MOCK_TENANT)
         .fetch_one(pool)
         .await
         .unwrap()
@@ -550,6 +567,53 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let result: serde_json::Value = body_json(resp).await;
         assert_eq!(result["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[sqlx::test]
+    async fn explore_history_isolated_by_tenant(pool: sqlx::PgPool) {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1,'A',$2),($3,'B',$4)")
+            .bind(a)
+            .bind(format!("a-{}", a))
+            .bind(b)
+            .bind(format!("b-{}", b))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ds_a: Uuid = sqlx::query_scalar(
+            "INSERT INTO datasources (name, type, url, tenant_id) \
+             VALUES ('p','prometheus','http://x',$1) RETURNING id",
+        )
+        .bind(a)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO explore_history (datasource_id, query, query_type, tenant_id) \
+             VALUES ($1, 'up', 'prometheus', $2)",
+        )
+        .bind(ds_a)
+        .bind(a)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL ROLE strata_app")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+            .bind(b.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM explore_history")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0, "tenant B must not see tenant A explore history");
     }
 
     #[sqlx::test]

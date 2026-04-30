@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::Path,
     routing::{get, post},
     Json, Router,
 };
@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
 use uuid::Uuid;
 
+use crate::db::TenantTx;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 
@@ -53,49 +54,51 @@ pub fn dashboard_routes() -> Router<AppState> {
         .route("/{slug}/star", post(toggle_star))
 }
 
-async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<Dashboard>>> {
+async fn list(mut tx: TenantTx) -> AppResult<Json<Vec<Dashboard>>> {
     let rows = sqlx::query_as::<_, Dashboard>(
         "SELECT * FROM dashboards ORDER BY is_starred DESC, updated_at DESC",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(rows))
 }
 
 async fn create(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Json(input): Json<CreateDashboard>,
 ) -> AppResult<Json<Dashboard>> {
+    let tenant_id = tx.tenant_id();
     let row = sqlx::query_as::<_, Dashboard>(
-        "INSERT INTO dashboards (title, slug, description, time_range, refresh_interval, variables)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        "INSERT INTO dashboards (tenant_id, title, slug, description, time_range, refresh_interval, variables)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *",
     )
+    .bind(tenant_id)
     .bind(&input.title)
     .bind(&input.slug)
     .bind(&input.description)
     .bind(input.time_range.as_deref().unwrap_or("1h"))
     .bind(input.refresh_interval.unwrap_or(0))
     .bind(&input.variables)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(slug): Path<String>,
-) -> AppResult<Json<Dashboard>> {
+async fn get_one(mut tx: TenantTx, Path(slug): Path<String>) -> AppResult<Json<Dashboard>> {
     let row = sqlx::query_as::<_, Dashboard>("SELECT * FROM dashboards WHERE slug = $1")
         .bind(&slug)
-        .fetch_optional(&state.db)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
 async fn update(
-    State(state): State<AppState>,
+    mut tx: TenantTx,
     Path(slug): Path<String>,
     Json(input): Json<UpdateDashboard>,
 ) -> AppResult<Json<Dashboard>> {
@@ -118,32 +121,32 @@ async fn update(
     .bind(&input.time_range)
     .bind(input.refresh_interval)
     .bind(&input.variables)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
-async fn remove(State(state): State<AppState>, Path(slug): Path<String>) -> AppResult<Json<()>> {
+async fn remove(mut tx: TenantTx, Path(slug): Path<String>) -> AppResult<Json<()>> {
     sqlx::query("DELETE FROM dashboards WHERE slug = $1")
         .bind(&slug)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(()))
 }
 
-async fn toggle_star(
-    State(state): State<AppState>,
-    Path(slug): Path<String>,
-) -> AppResult<Json<Dashboard>> {
+async fn toggle_star(mut tx: TenantTx, Path(slug): Path<String>) -> AppResult<Json<Dashboard>> {
     let row = sqlx::query_as::<_, Dashboard>(
         "UPDATE dashboards SET is_starred = NOT COALESCE(is_starred, false), updated_at = now()
          WHERE slug = $1 RETURNING *",
     )
     .bind(&slug)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("Dashboard not found".into()))?;
+    tx.commit().await?;
     Ok(Json(row))
 }
 
@@ -157,7 +160,7 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         let state = crate::AppState {
-            db,
+            pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
@@ -169,7 +172,11 @@ mod tests {
             },
             notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
-        dashboard_routes().with_state(state)
+        dashboard_routes()
+            .layer(axum::middleware::from_fn(
+                crate::middleware::tenant::inject_mock_tenant,
+            ))
+            .with_state(state)
     }
 
     async fn body_json<T: serde::de::DeserializeOwned>(resp: axum::response::Response) -> T {
@@ -386,5 +393,51 @@ mod tests {
         assert_eq!(created.description, Some("A full dashboard".into()));
         assert_eq!(created.time_range, Some("24h".into()));
         assert_eq!(created.refresh_interval, Some(30));
+    }
+
+    #[sqlx::test]
+    async fn dashboards_isolated_by_tenant(pool: sqlx::PgPool) {
+        // Seed two tenants and one dashboard per tenant (still as the super
+        // migration role — superusers bypass RLS, so these inserts succeed).
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3), ($4, $5, $6)")
+            .bind(a)
+            .bind("A")
+            .bind(format!("a-{}", a))
+            .bind(b)
+            .bind("B")
+            .bind(format!("b-{}", b))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO dashboards (title, slug, layout, tenant_id) \
+             VALUES ('A-board', 'a-board', '[]'::jsonb, $1), \
+                    ('B-board', 'b-board', '[]'::jsonb, $2)",
+        )
+        .bind(a)
+        .bind(b)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // To exercise RLS, drop into the strata_app non-super role. SET LOCAL
+        // ROLE only persists for this transaction.
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL ROLE strata_app")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+            .bind(a.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let titles: Vec<String> = sqlx::query_scalar("SELECT title FROM dashboards ORDER BY title")
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(titles, vec!["A-board".to_string()]);
     }
 }

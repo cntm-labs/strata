@@ -105,7 +105,7 @@ mod tests {
     async fn valid_token_passes_through(pool: sqlx::PgPool) {
         let secret = "test-secret-key";
         let state = crate::AppState {
-            db: pool,
+            pool,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
@@ -137,7 +137,7 @@ mod tests {
     async fn expired_token_returns_401(pool: sqlx::PgPool) {
         let secret = "test-secret-key";
         let state = crate::AppState {
-            db: pool,
+            pool,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
@@ -167,7 +167,7 @@ mod tests {
     #[sqlx::test]
     async fn wrong_secret_returns_401(pool: sqlx::PgPool) {
         let state = crate::AppState {
-            db: pool,
+            pool,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
@@ -197,7 +197,7 @@ mod tests {
     #[sqlx::test]
     async fn missing_bearer_prefix_returns_401(pool: sqlx::PgPool) {
         let state = crate::AppState {
-            db: pool,
+            pool,
             config: crate::config::AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),

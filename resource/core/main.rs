@@ -2,7 +2,9 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod datasource;
+pub mod db;
 pub mod error;
+pub mod middleware;
 pub mod notifier;
 
 use std::sync::Arc;
@@ -17,7 +19,7 @@ use tower_http::trace::TraceLayer;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: sqlx::PgPool,
+    pub pool: sqlx::PgPool,
     pub config: AppConfig,
     pub notifier: Arc<notifier::Notifier>,
 }
@@ -35,7 +37,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1", api::panels::panel_routes_nested())
         .nest("/api/v1/explore", api::explore::explore_routes())
         .nest("/api/v1/alerts", api::alerts::alert_routes())
-        .nest("/api/v1/templates", api::templates::template_routes());
+        .nest("/api/v1/templates", api::templates::template_routes())
+        .layer(axum::middleware::from_fn(
+            middleware::tenant::inject_mock_tenant,
+        ));
 
     let protected = if state.config.nucleus_secret_key.is_some() {
         protected.layer(axum::middleware::from_fn_with_state(
@@ -65,14 +70,14 @@ async fn main() {
 
     let config = AppConfig::from_env();
 
-    let db = PgPoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(20)
         .connect(&config.database_url)
         .await
         .expect("Failed to connect to database");
 
     sqlx::migrate!("./migrations")
-        .run(&db)
+        .run(&pool)
         .await
         .expect("Failed to run database migrations");
 
@@ -82,7 +87,7 @@ async fn main() {
     ));
 
     let state = AppState {
-        db,
+        pool,
         config: config.clone(),
         notifier,
     };
@@ -103,13 +108,13 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    fn test_state(db: sqlx::PgPool) -> AppState {
-        test_state_with_auth(db, None)
+    fn test_state(pool: sqlx::PgPool) -> AppState {
+        test_state_with_auth(pool, None)
     }
 
-    fn test_state_with_auth(db: sqlx::PgPool, secret_key: Option<String>) -> AppState {
+    fn test_state_with_auth(pool: sqlx::PgPool, secret_key: Option<String>) -> AppState {
         AppState {
-            db,
+            pool,
             config: AppConfig {
                 database_url: String::new(),
                 host: "127.0.0.1".into(),
