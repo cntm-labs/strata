@@ -1,0 +1,14 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$STRATA_DOMAIN} {
+    encode zstd gzip
+
+    reverse_proxy strata:3000
+
+    log {
+        output stdout
+        format json
+    }
+}
