@@ -195,6 +195,8 @@ mod tests {
             pool: db,
             config: crate::config::AppConfig {
                 database_url: String::new(),
+                database_url_admin: None,
+                strata_app_password: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
                 nucleus_secret_key: None,

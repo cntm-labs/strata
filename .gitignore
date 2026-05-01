@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 *.pem
 *.key
 *.cert
@@ -51,3 +52,9 @@ htmlcov/
 
 # ===== Worktrees =====
 .worktrees/
+
+# ===== Superpowers / agent workflow artifacts =====
+# Specs and plans are local design notes for the brainstorming/writing-plans
+# workflow; they are not part of the published docs site.
+.superpowers/
+docs/superpowers/

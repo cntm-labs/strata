@@ -12,7 +12,6 @@ use std::sync::Arc;
 use axum::{routing::get, Json, Router};
 use config::AppConfig;
 use serde_json::{json, Value};
-use sqlx::postgres::PgPoolOptions;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -70,16 +69,9 @@ async fn main() {
 
     let config = AppConfig::from_env();
 
-    let pool = PgPoolOptions::new()
-        .max_connections(20)
-        .connect(&config.database_url)
+    let pool = db::bootstrap_db(&config)
         .await
-        .expect("Failed to connect to database");
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run database migrations");
+        .expect("Failed to bootstrap database");
 
     let notifier = Arc::new(notifier::Notifier::new(
         config.resend_api_key.as_deref(),
@@ -117,6 +109,8 @@ mod tests {
             pool,
             config: AppConfig {
                 database_url: String::new(),
+                database_url_admin: None,
+                strata_app_password: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
                 nucleus_secret_key: secret_key,
