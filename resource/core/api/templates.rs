@@ -232,8 +232,8 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let items: Vec<DashboardTemplate> = body_json(resp).await;
-        // Migration 002 seeds 6 + migration 004 adds 2 = 8 active templates
-        assert_eq!(items.len(), 8);
+        // Migration 002 seeds 6 + 004 adds 2 + 006 adds 1 (strata-health) = 9 active templates
+        assert_eq!(items.len(), 9);
         assert!(items.iter().all(|t| t.is_active));
     }
 
@@ -247,9 +247,39 @@ mod tests {
             .await
             .unwrap();
         let items: Vec<DashboardTemplate> = body_json(resp).await;
-        // 8 seeded active + 0 inactive (inactive-tmpl excluded)
-        assert_eq!(items.len(), 8);
+        // 9 seeded active + 0 inactive (inactive-tmpl excluded)
+        assert_eq!(items.len(), 9);
         assert!(!items.iter().any(|t| t.slug == "inactive-tmpl"));
+    }
+
+    #[sqlx::test]
+    async fn strata_health_template_seeded_with_eight_panels(pool: sqlx::PgPool) {
+        let template = sqlx::query_as::<_, DashboardTemplate>(
+            "SELECT * FROM dashboard_templates WHERE slug = 'strata-health'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            template.required_datasource_type.as_deref(),
+            Some("prometheus")
+        );
+        assert_eq!(template.category, "observability");
+        assert!(template.is_active);
+
+        let panels = template
+            .dashboard_json
+            .get("panels")
+            .and_then(|p| p.as_array())
+            .expect("strata-health should have panels array");
+        assert_eq!(panels.len(), 8);
+
+        // Spot-check that the active-connections gauge panel exists.
+        let has_gauge = panels
+            .iter()
+            .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("gauge"));
+        assert!(has_gauge, "strata-health should have a gauge panel");
     }
 
     #[sqlx::test]
