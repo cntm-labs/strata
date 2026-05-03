@@ -54,19 +54,26 @@ pub fn install_for_tests() {
 }
 
 /// Returns Ok(()) if this call performed the installation, Err(()) if a
-/// recorder was already installed.
+/// recorder was already installed (either by an earlier call here or by
+/// some other test fixture racing us).
 fn install_recorder_only() -> Result<(), ()> {
     if HANDLE.get().is_some() {
         return Err(());
     }
-    let handle = PrometheusBuilder::new()
+    // `install_recorder` itself fails if a global recorder is already set —
+    // can happen under parallel tests where two threads pass the OnceLock
+    // check above before either reaches install_recorder. Tolerate it.
+    let handle = match PrometheusBuilder::new()
         .set_buckets_for_metric(
             Matcher::Suffix("_duration_seconds".to_string()),
             DURATION_BUCKETS,
         )
         .expect("set_buckets_for_metric must succeed")
         .install_recorder()
-        .expect("install_recorder must succeed");
+    {
+        Ok(h) => h,
+        Err(_) => return Err(()),
+    };
     register_descriptors();
     HANDLE.set(handle).map_err(|_| ())?;
     Ok(())
