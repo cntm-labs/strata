@@ -28,8 +28,17 @@ async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
+async fn metrics_handler() -> ([(&'static str, &'static str); 1], String) {
+    (
+        [("content-type", "text/plain; version=0.0.4")],
+        metrics::render(),
+    )
+}
+
 pub fn build_router(state: AppState) -> Router {
-    let public = Router::new().route("/api/v1/health", get(health));
+    let public = Router::new()
+        .route("/api/v1/health", get(health))
+        .route("/metrics", get(metrics_handler));
 
     let protected = Router::new()
         .nest("/api/v1/datasources", api::datasources::datasource_routes())
@@ -55,6 +64,7 @@ pub fn build_router(state: AppState) -> Router {
     public
         .merge(protected.with_state(state))
         .fallback_service(ServeDir::new("static").fallback(ServeFile::new("static/index.html")))
+        .layer(axum::middleware::from_fn(metrics::middleware::record_http))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
 }
@@ -73,6 +83,8 @@ async fn main() {
     let pool = db::bootstrap_db(&config)
         .await
         .expect("Failed to bootstrap database");
+
+    metrics::install(&pool);
 
     let notifier = Arc::new(notifier::Notifier::new(
         config.resend_api_key.as_deref(),
@@ -121,6 +133,41 @@ mod tests {
             },
             notifier: Arc::new(notifier::Notifier::new(None, "test@test.com")),
         }
+    }
+
+    #[sqlx::test]
+    async fn metrics_endpoint_returns_prometheus_format(pool: sqlx::PgPool) {
+        crate::metrics::install(&pool.clone());
+        let app = build_router(test_state(pool));
+
+        // Drive a request through the recording middleware first so the
+        // exporter has at least one observed sample to emit HELP/TYPE for.
+        let _ = app
+            .clone()
+            .oneshot(Request::get("/api/v1/health").body(Body::empty()).unwrap())
+            .await;
+
+        let resp = app
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .expect("content-type header")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(ct.starts_with("text/plain"), "content-type was {ct}");
+
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            body.contains("# HELP") || body.contains("# TYPE"),
+            "body did not contain Prometheus exposition headers; got:\n{body}"
+        );
     }
 
     #[sqlx::test]
