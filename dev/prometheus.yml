@@ -2,6 +2,8 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: 'strata'
-    static_targets:
-      - targets: ['host.docker.internal:3000']
+  - job_name: strata
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - strata:3000
