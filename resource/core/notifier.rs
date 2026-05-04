@@ -1,5 +1,6 @@
 use chorus::prelude::*;
 use chorus::providers::email::resend::ResendEmailSender;
+use metrics::counter;
 use std::sync::Arc;
 
 pub struct Notifier {
@@ -26,10 +27,11 @@ impl Notifier {
     ) -> Result<(), String> {
         let Some(ref chorus) = self.chorus else {
             tracing::warn!("Email not configured — skipping notification to {}", to);
+            counter!("strata_email_sent_total", "status" => "skipped").increment(1);
             return Ok(());
         };
 
-        chorus
+        match chorus
             .send_email(&EmailMessage {
                 to: to.to_string(),
                 subject: format!("[Strata Alert] {}", rule_name),
@@ -41,9 +43,16 @@ impl Notifier {
                 from: None,
             })
             .await
-            .map_err(|e| e.to_string())?;
-
-        Ok(())
+        {
+            Ok(_) => {
+                counter!("strata_email_sent_total", "status" => "success").increment(1);
+                Ok(())
+            }
+            Err(e) => {
+                counter!("strata_email_sent_total", "status" => "error").increment(1);
+                Err(e.to_string())
+            }
+        }
     }
 }
 
@@ -70,6 +79,22 @@ mod tests {
             .send_alert_email("user@test.com", "CPU Alert", "CPU is at 95%")
             .await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn send_alert_email_records_skipped_metric_when_disabled() {
+        crate::metrics::install_for_tests();
+        let notifier = Notifier::new(None, "test@test.com");
+        notifier
+            .send_alert_email("user@test.com", "Test", "Body")
+            .await
+            .unwrap();
+        let rendered = crate::metrics::render();
+        assert!(
+            rendered.contains("strata_email_sent_total")
+                && rendered.contains(r#"status="skipped""#),
+            "expected skipped counter; got:\n{rendered}"
+        );
     }
 
     #[tokio::test]

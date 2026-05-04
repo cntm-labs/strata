@@ -1,4 +1,7 @@
+use std::time::Instant;
+
 use axum::{extract::Path, Json};
+use metrics::{counter, histogram};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -32,42 +35,65 @@ pub async fn proxy_query(
     // don't hold a Postgres connection for the duration of the outbound call.
     tx.commit().await?;
 
-    let result = match ds.ds_type.as_str() {
-        "prometheus" => {
-            let client = PrometheusClient::new(&ds.url);
-            if let (Some(start), Some(end), Some(step)) = (&input.start, &input.end, &input.step) {
-                let resp = client.query_range(&input.query, start, end, step).await?;
-                serde_json::to_value(resp)?
-            } else {
-                let resp = client.query(&input.query, None, None).await?;
-                serde_json::to_value(resp)?
+    let datasource_type = ds.ds_type.clone();
+    let start = Instant::now();
+    let dispatch_result: Result<serde_json::Value, AppError> = async {
+        match ds.ds_type.as_str() {
+            "prometheus" => {
+                let client = PrometheusClient::new(&ds.url);
+                if let (Some(start), Some(end), Some(step)) =
+                    (&input.start, &input.end, &input.step)
+                {
+                    let resp = client.query_range(&input.query, start, end, step).await?;
+                    Ok(serde_json::to_value(resp)?)
+                } else {
+                    let resp = client.query(&input.query, None, None).await?;
+                    Ok(serde_json::to_value(resp)?)
+                }
             }
-        }
-        "loki" => {
-            let client = LokiClient::new(&ds.url);
-            if let (Some(start), Some(end)) = (&input.start, &input.end) {
-                let resp = client
-                    .query_range(&input.query, start, end, input.limit)
-                    .await?;
-                serde_json::to_value(resp)?
-            } else {
-                let resp = client.query(&input.query, input.limit).await?;
-                serde_json::to_value(resp)?
+            "loki" => {
+                let client = LokiClient::new(&ds.url);
+                if let (Some(start), Some(end)) = (&input.start, &input.end) {
+                    let resp = client
+                        .query_range(&input.query, start, end, input.limit)
+                        .await?;
+                    Ok(serde_json::to_value(resp)?)
+                } else {
+                    let resp = client.query(&input.query, input.limit).await?;
+                    Ok(serde_json::to_value(resp)?)
+                }
             }
-        }
-        "postgresql" => {
-            let rows = postgresql::execute_query(&ds.url, &input.query).await?;
-            serde_json::to_value(rows)?
-        }
-        other => {
-            return Err(AppError::BadRequest(format!(
+            "postgresql" => {
+                let rows = postgresql::execute_query(&ds.url, &input.query).await?;
+                Ok(serde_json::to_value(rows)?)
+            }
+            other => Err(AppError::BadRequest(format!(
                 "Unsupported datasource type: {}",
                 other
-            )))
+            ))),
         }
-    };
+    }
+    .await;
+    let elapsed = start.elapsed().as_secs_f64();
 
-    Ok(Json(result))
+    let status = if dispatch_result.is_ok() {
+        "success"
+    } else {
+        "error"
+    };
+    counter!(
+        "strata_query_proxy_total",
+        "datasource_type" => datasource_type.clone(),
+        "status" => status,
+    )
+    .increment(1);
+    histogram!(
+        "strata_query_proxy_duration_seconds",
+        "datasource_type" => datasource_type,
+    )
+    .record(elapsed);
+
+    Ok(Json(dispatch_result?))
 }
 
 #[cfg(test)]
@@ -127,6 +153,60 @@ mod tests {
         .fetch_one(pool)
         .await
         .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn proxy_records_metric_on_success(pool: sqlx::PgPool) {
+        crate::metrics::install(&pool);
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "success", "data": {"resultType": "vector", "result": []}
+            })))
+            .mount(&mock)
+            .await;
+
+        let ds_id = seed_ds(&pool, "prometheus", &mock.uri()).await;
+        let app = test_app(pool);
+        let resp = app
+            .oneshot(json_request(
+                &format!("/{}/query", ds_id),
+                serde_json::json!({"query": "up"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let rendered = crate::metrics::render();
+        assert!(
+            rendered.contains("strata_query_proxy_total")
+                && rendered.contains(r#"datasource_type="prometheus""#)
+                && rendered.contains(r#"status="success""#),
+            "expected success counter; got:\n{rendered}"
+        );
+    }
+
+    #[sqlx::test]
+    async fn proxy_records_metric_on_failure(pool: sqlx::PgPool) {
+        crate::metrics::install(&pool);
+        // Unreachable URL forces dispatch error.
+        let ds_id = seed_ds(&pool, "prometheus", "http://127.0.0.1:1").await;
+        let app = test_app(pool);
+        let _ = app
+            .oneshot(json_request(
+                &format!("/{}/query", ds_id),
+                serde_json::json!({"query": "up"}),
+            ))
+            .await
+            .unwrap();
+        let rendered = crate::metrics::render();
+        assert!(
+            rendered.contains("strata_query_proxy_total")
+                && rendered.contains(r#"datasource_type="prometheus""#)
+                && rendered.contains(r#"status="error""#),
+            "expected error counter; got:\n{rendered}"
+        );
     }
 
     #[sqlx::test]

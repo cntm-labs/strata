@@ -3,6 +3,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
 use uuid::Uuid;
@@ -224,6 +225,13 @@ async fn test_fire_rule(
     };
 
     let state_str = if firing { "firing" } else { "ok" };
+    if firing {
+        counter!(
+            "strata_alerts_fired_total",
+            "severity" => rule.severity.clone(),
+        )
+        .increment(1);
+    }
     let event = sqlx::query_as::<_, AlertEvent>(
         "INSERT INTO alert_events (tenant_id, rule_id, state, value, message)
          VALUES ($1, $2, $3, $4, $5) RETURNING *",
@@ -609,6 +617,70 @@ mod tests {
         assert_eq!(event.rule_id, rule.id);
         assert_eq!(event.state, "firing");
         assert!(event.value.unwrap() > 0.0);
+    }
+
+    #[sqlx::test]
+    async fn test_fire_records_alerts_fired_metric(pool: sqlx::PgPool) {
+        crate::metrics::install(&pool);
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/api/v1/query"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "status": "success",
+                    "data": {"resultType": "vector", "result": [
+                        {"metric": {"__name__": "up"}, "value": [1700000000, "1.0"]}
+                    ]}
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ds_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO datasources (name, type, url, tenant_id) VALUES ('Prom', 'prometheus', $1, $2) RETURNING id",
+        )
+        .bind(mock.uri())
+        .bind(MOCK_TENANT)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let app = test_app(pool.clone());
+        let create_resp = app
+            .oneshot(json_request(
+                "POST",
+                "/rules",
+                serde_json::json!({
+                    "name": "Metric Test",
+                    "datasource_id": ds_id,
+                    "query": "up",
+                    "condition": "gt",
+                    "threshold": 0.5,
+                    "severity": "critical",
+                    "notification_channels": [],
+                    "notification_recipients": []
+                }),
+            ))
+            .await
+            .unwrap();
+        let rule: AlertRule = body_json(create_resp).await;
+
+        let app = test_app(pool);
+        let _ = app
+            .oneshot(
+                Request::post(format!("/rules/{}/test", rule.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let rendered = crate::metrics::render();
+        assert!(
+            rendered.contains("strata_alerts_fired_total")
+                && rendered.contains(r#"severity="critical""#),
+            "expected severity counter; got:\n{rendered}"
+        );
     }
 
     #[sqlx::test]
