@@ -5,6 +5,8 @@ pub struct AppConfig {
     pub database_url: String,
     pub database_url_admin: Option<String>,
     pub strata_app_password: Option<String>,
+    pub sentry_dsn: Option<String>,
+    pub strata_env: Option<String>,
     pub host: String,
     pub port: u16,
     pub nucleus_secret_key: Option<String>,
@@ -21,6 +23,8 @@ impl AppConfig {
                 .unwrap_or_else(|_| "postgres://strata:secret@localhost:5432/strata".to_string()),
             database_url_admin: env::var("DATABASE_URL_ADMIN").ok(),
             strata_app_password: env::var("STRATA_APP_PASSWORD").ok(),
+            sentry_dsn: env::var("SENTRY_DSN").ok(),
+            strata_env: env::var("STRATA_ENV").ok(),
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
             port: env::var("PORT")
                 .ok()
@@ -105,6 +109,8 @@ mod tests {
             database_url: "url".into(),
             database_url_admin: Some("admin_url".into()),
             strata_app_password: Some("pw".into()),
+            sentry_dsn: Some("https://x@y/1".into()),
+            strata_env: Some("test".into()),
             host: "host".into(),
             port: 1234,
             nucleus_secret_key: Some("sk_test".into()),
@@ -116,6 +122,8 @@ mod tests {
         assert_eq!(cloned.database_url, "url");
         assert_eq!(cloned.database_url_admin.as_deref(), Some("admin_url"));
         assert_eq!(cloned.strata_app_password.as_deref(), Some("pw"));
+        assert_eq!(cloned.sentry_dsn.as_deref(), Some("https://x@y/1"));
+        assert_eq!(cloned.strata_env.as_deref(), Some("test"));
         assert_eq!(cloned.host, "host");
         assert_eq!(cloned.port, 1234);
         assert_eq!(cloned.nucleus_secret_key.as_deref(), Some("sk_test"));
@@ -155,6 +163,35 @@ mod tests {
         assert!(cfg.strata_app_password.is_none());
         // Cleanup so the shared `from_env_reads_and_defaults` test sees a clean slate
         // when it runs after this one.
+        std::env::remove_var("ALERT_FROM_EMAIL");
+    }
+
+    #[test]
+    fn from_env_reads_optional_sentry_dsn_and_env() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("SENTRY_DSN", "https://public@o0.example.invalid/1");
+        std::env::set_var("STRATA_ENV", "staging");
+        std::env::set_var("ALERT_FROM_EMAIL", "a@b");
+        let cfg = AppConfig::from_env();
+        assert_eq!(
+            cfg.sentry_dsn.as_deref(),
+            Some("https://public@o0.example.invalid/1")
+        );
+        assert_eq!(cfg.strata_env.as_deref(), Some("staging"));
+        std::env::remove_var("SENTRY_DSN");
+        std::env::remove_var("STRATA_ENV");
+        std::env::remove_var("ALERT_FROM_EMAIL");
+    }
+
+    #[test]
+    fn from_env_sentry_fields_default_to_none() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("SENTRY_DSN");
+        std::env::remove_var("STRATA_ENV");
+        std::env::set_var("ALERT_FROM_EMAIL", "a@b");
+        let cfg = AppConfig::from_env();
+        assert!(cfg.sentry_dsn.is_none());
+        assert!(cfg.strata_env.is_none());
         std::env::remove_var("ALERT_FROM_EMAIL");
     }
 }
