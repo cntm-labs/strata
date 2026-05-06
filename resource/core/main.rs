@@ -66,20 +66,30 @@ pub fn build_router(state: AppState) -> Router {
         .merge(protected.with_state(state))
         .fallback_service(ServeDir::new("static").fallback(ServeFile::new("static/index.html")))
         .layer(axum::middleware::from_fn(metrics::middleware::record_http))
+        .layer(sentry::integrations::tower::SentryHttpLayer::with_transaction())
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
 }
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    let config = AppConfig::from_env();
+
+    // Sentry guard MUST be the first binding so it drops last (Rust drop
+    // order is reverse of construction). That guarantees panics during
+    // early startup get flushed before the process exits.
+    let _sentry_guard = observability::sentry::init(&config);
+
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "strata=debug,tower_http=debug".into()),
         )
+        .with(observability::sentry::tracing_layer())
         .init();
-
-    let config = AppConfig::from_env();
 
     let pool = db::bootstrap_db(&config)
         .await
