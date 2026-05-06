@@ -193,6 +193,31 @@ mod tests {
     }
 
     #[test]
+    fn before_send_scrubs_query_string() {
+        use sentry::protocol::{Event, Request};
+        let event = Event {
+            request: Some(Request {
+                query_string: Some("token=secret&keep=ok".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let scrubbed = before_send(event).unwrap();
+        let qs = scrubbed.request.unwrap().query_string.unwrap();
+        assert!(qs.contains("token=[redacted]"));
+        assert!(qs.contains("keep=ok"));
+    }
+
+    #[test]
+    fn tracing_layer_constructs() {
+        // Smoke test that the function compiles and returns a usable layer.
+        // Cannot exercise event routing without a live Sentry hub bound to
+        // a real subscriber; the integration test in main.rs::tests covers
+        // the end-to-end path indirectly.
+        let _layer = tracing_layer::<tracing_subscriber::Registry>();
+    }
+
+    #[test]
     fn before_send_drops_user_and_body() {
         use sentry::protocol::{Event, Request, User};
         let event = Event {
