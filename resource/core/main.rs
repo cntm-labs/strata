@@ -7,6 +7,7 @@ pub mod error;
 pub mod metrics;
 pub mod middleware;
 pub mod notifier;
+pub mod observability;
 
 use std::sync::Arc;
 
