@@ -19,6 +19,10 @@ allow = [
     "BSL-1.0",
     "0BSD",
     "Zlib",
+    # webpki-roots ships the Mozilla CA root certificates (a curated data
+    # set) under CDLA-Permissive-2.0. Pulled in transitively via
+    # rustls / reqwest / sentry. The license is permissive for data.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 

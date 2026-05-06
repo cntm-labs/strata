@@ -23,6 +23,17 @@ pub async fn record_http(req: Request, next: Next) -> Response {
         .map(|p| p.as_str().to_string())
         .unwrap_or_else(|| "<unmatched>".to_string());
 
+    // Tag the per-request Sentry scope (created by SentryHttpLayer earlier
+    // in the chain) with tenant_id so any error captured downstream carries
+    // it. No-op when Sentry is uninitialised — set_tag writes into the
+    // current hub which is a default no-op hub without a client.
+    if let Some(tenant) = req.extensions().get::<crate::db::TenantId>() {
+        let tid = tenant.0.to_string();
+        sentry::configure_scope(|scope| {
+            scope.set_tag("tenant_id", tid);
+        });
+    }
+
     let start = Instant::now();
     let response = next.run(req).await;
     let elapsed = start.elapsed().as_secs_f64();

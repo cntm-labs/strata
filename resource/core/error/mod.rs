@@ -37,6 +37,15 @@ impl IntoResponse for AppError {
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
 
+        // Capture only operational errors. 4xx variants are user errors and
+        // would explode Sentry quota for no diagnostic benefit. NOTE: the
+        // captured message inherits the `e.to_string()` payload from sqlx /
+        // reqwest — defensively avoid binding tenant content into SQL via
+        // format!() so this can't leak per-row data.
+        if status.is_server_error() {
+            sentry::capture_error(&self);
+        }
+
         let body = ErrorResponse {
             code: status.as_u16(),
             status: status.canonical_reason().unwrap_or("Error").to_string(),
@@ -137,6 +146,35 @@ mod tests {
         assert_eq!(
             AppError::Internal("z".into()).to_string(),
             "Internal error: z"
+        );
+    }
+
+    #[test]
+    fn server_error_captures_sentry_event() {
+        let events = sentry::test::with_captured_events(|| {
+            let _ = AppError::Internal("boom".to_string()).into_response();
+        });
+        assert_eq!(events.len(), 1, "expected exactly one captured event");
+    }
+
+    #[test]
+    fn database_error_captures_sentry_event() {
+        let events = sentry::test::with_captured_events(|| {
+            let _ = AppError::Database(sqlx::Error::PoolTimedOut).into_response();
+        });
+        assert_eq!(events.len(), 1, "expected exactly one captured event");
+    }
+
+    #[test]
+    fn client_error_skips_sentry() {
+        let events = sentry::test::with_captured_events(|| {
+            let _ = AppError::NotFound("widget".to_string()).into_response();
+            let _ = AppError::BadRequest("malformed".to_string()).into_response();
+        });
+        assert_eq!(
+            events.len(),
+            0,
+            "client errors must not be captured; got {events:?}"
         );
     }
 

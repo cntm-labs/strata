@@ -80,6 +80,8 @@ mod tests {
             database_url: url.to_string(),
             database_url_admin: None,
             strata_app_password: None,
+            sentry_dsn: None,
+            strata_env: None,
             host: "127.0.0.1".into(),
             port: 3000,
             nucleus_secret_key: None,
