@@ -36,6 +36,8 @@ services:
       NUCLEUS_BASE_URL: ${NUCLEUS_BASE_URL:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       ALERT_FROM_EMAIL: ${ALERT_FROM_EMAIL:-alerts@strata.local}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      STRATA_ENV: ${STRATA_ENV:-production}
     restart: unless-stopped
     deploy:
       resources:
