@@ -58,3 +58,4 @@ htmlcov/
 # workflow; they are not part of the published docs site.
 .superpowers/
 docs/superpowers/
+.terraform/
