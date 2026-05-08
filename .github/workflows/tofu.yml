@@ -1,0 +1,31 @@
+name: tofu
+
+on:
+  push:
+    branches: [main]
+    paths: ['tofu/**']
+  pull_request:
+    paths: ['tofu/**']
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: tofu fmt + validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: '1.8.0'
+
+      - name: tofu fmt -check
+        run: tofu fmt -check -recursive tofu/
+
+      - name: tofu init (no backend)
+        run: tofu init -backend=false
+        working-directory: tofu/prod
+
+      - name: tofu validate
+        run: tofu validate
+        working-directory: tofu/prod
