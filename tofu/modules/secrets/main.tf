@@ -6,7 +6,7 @@
 # This module manages the 5 "value-only" secrets that have no
 # dependency on RDS or any other module:
 #   - postgres_password / strata_app_password (random_password generated)
-#   - nucleus_secret_key / resend_api_key / sentry_dsn (operator vars)
+#   - nucleus_api_key / resend_api_key / sentry_dsn (operator vars)
 #
 # DATABASE_URL_ADMIN and DATABASE_URL are composed inline in
 # tofu/prod/main.tf — they need module.rds.endpoint *and* the
@@ -51,13 +51,13 @@ resource "aws_secretsmanager_secret_version" "strata_app_password" {
 }
 
 resource "aws_secretsmanager_secret" "nucleus" {
-  name        = "${var.name_prefix}/nucleus-secret-key"
+  name        = "${var.name_prefix}/nucleus-api-key"
   description = "Nucleus JWT signing key (optional — empty disables auth)"
 }
 
 resource "aws_secretsmanager_secret_version" "nucleus" {
   secret_id     = aws_secretsmanager_secret.nucleus.id
-  secret_string = var.nucleus_secret_key
+  secret_string = var.nucleus_api_key
 }
 
 resource "aws_secretsmanager_secret" "resend" {

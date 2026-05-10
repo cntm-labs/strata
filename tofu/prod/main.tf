@@ -48,10 +48,10 @@ module "vpc" {
 module "secrets" {
   source = "../modules/secrets"
 
-  name_prefix        = local.name
-  nucleus_secret_key = var.nucleus_secret_key
-  resend_api_key     = var.resend_api_key
-  sentry_dsn         = var.sentry_dsn
+  name_prefix     = local.name
+  nucleus_api_key = var.nucleus_api_key
+  resend_api_key  = var.resend_api_key
+  sentry_dsn      = var.sentry_dsn
 }
 
 module "rds" {

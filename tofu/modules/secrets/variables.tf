@@ -3,8 +3,8 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "nucleus_secret_key" {
-  description = "Nucleus JWT signing key. Empty string disables auth."
+variable "nucleus_api_key" {
+  description = "Nucleus admin API key (used by SDK to fetch JWKS). Empty string disables auth."
   type        = string
   sensitive   = true
   default     = ""

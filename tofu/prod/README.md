@@ -59,7 +59,7 @@ Then uncomment the `backend "s3"` block in `main.tf` and fill in:
 
 ```bash
 # 1. Sensitive vars — never commit these to the repo.
-export TF_VAR_nucleus_secret_key="your-nucleus-key"
+export TF_VAR_nucleus_api_key="your-nucleus-key"
 export TF_VAR_resend_api_key="re_..."
 export TF_VAR_sentry_dsn="https://...@sentry.io/..."
 
