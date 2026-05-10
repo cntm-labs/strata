@@ -27,7 +27,7 @@ pub async fn require_auth(
 ) -> Result<Response, StatusCode> {
     let secret_key = state
         .config
-        .nucleus_secret_key
+        .nucleus_api_key
         .as_deref()
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -114,7 +114,8 @@ mod tests {
                 strata_env: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
-                nucleus_secret_key: Some(secret.into()),
+                nucleus_api_key: Some(secret.into()),
+                nucleus_jwks_cache_ttl_secs: None,
                 nucleus_base_url: None,
                 resend_api_key: None,
                 alert_from_email: "test@test.com".into(),
@@ -150,7 +151,8 @@ mod tests {
                 strata_env: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
-                nucleus_secret_key: Some(secret.into()),
+                nucleus_api_key: Some(secret.into()),
+                nucleus_jwks_cache_ttl_secs: None,
                 nucleus_base_url: None,
                 resend_api_key: None,
                 alert_from_email: "test@test.com".into(),
@@ -184,7 +186,8 @@ mod tests {
                 strata_env: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
-                nucleus_secret_key: Some("correct-secret".into()),
+                nucleus_api_key: Some("correct-secret".into()),
+                nucleus_jwks_cache_ttl_secs: None,
                 nucleus_base_url: None,
                 resend_api_key: None,
                 alert_from_email: "test@test.com".into(),
@@ -218,7 +221,8 @@ mod tests {
                 strata_env: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
-                nucleus_secret_key: Some("secret".into()),
+                nucleus_api_key: Some("secret".into()),
+                nucleus_jwks_cache_ttl_secs: None,
                 nucleus_base_url: None,
                 resend_api_key: None,
                 alert_from_email: "test@test.com".into(),

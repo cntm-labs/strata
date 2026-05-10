@@ -52,13 +52,13 @@ pub fn build_router(state: AppState) -> Router {
             middleware::tenant::inject_mock_tenant,
         ));
 
-    let protected = if state.config.nucleus_secret_key.is_some() {
+    let protected = if state.config.nucleus_api_key.is_some() {
         protected.layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
         ))
     } else {
-        tracing::warn!("NUCLEUS_SECRET_KEY not set — running without authentication");
+        tracing::warn!("NUCLEUS_API_KEY not set — running without authentication");
         protected
     };
 
@@ -139,7 +139,8 @@ mod tests {
                 strata_env: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
-                nucleus_secret_key: secret_key,
+                nucleus_api_key: secret_key,
+                nucleus_jwks_cache_ttl_secs: None,
                 nucleus_base_url: None,
                 resend_api_key: None,
                 alert_from_email: "test@test.com".into(),
