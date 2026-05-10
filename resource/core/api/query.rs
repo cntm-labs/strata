@@ -111,7 +111,7 @@ mod tests {
         // Mount via datasource routes since query is nested under /{id}/query
         crate::api::datasources::datasource_routes()
             .layer(axum::middleware::from_fn(
-                crate::middleware::tenant::inject_mock_tenant,
+                crate::middleware::tenant::inject_tenant,
             ))
             .with_state(crate::AppState {
                 pool: db,

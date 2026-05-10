@@ -1,5 +1,4 @@
 pub mod api;
-pub mod auth;
 pub mod config;
 pub mod datasource;
 pub mod db;
@@ -48,15 +47,19 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1/explore", api::explore::explore_routes())
         .nest("/api/v1/alerts", api::alerts::alert_routes())
         .nest("/api/v1/templates", api::templates::template_routes())
-        .layer(axum::middleware::from_fn(
-            middleware::tenant::inject_mock_tenant,
-        ));
+        .layer(axum::middleware::from_fn(middleware::tenant::inject_tenant));
 
-    let protected = if state.config.nucleus_api_key.is_some() {
-        protected.layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::require_auth,
-        ))
+    let protected = if let Some(api_key) = state.config.nucleus_api_key.as_deref() {
+        let client = Arc::new(cntm_nucleus::NucleusClient::new(
+            cntm_nucleus::NucleusConfig {
+                secret_key: api_key.to_string(),
+                base_url: state.config.nucleus_base_url.clone(),
+                jwks_cache_ttl_secs: state.config.nucleus_jwks_cache_ttl_secs,
+            },
+        ));
+        protected
+            .layer(axum::middleware::from_fn(middleware::auth::require_auth))
+            .layer(axum::Extension(client))
     } else {
         tracing::warn!("NUCLEUS_API_KEY not set — running without authentication");
         protected

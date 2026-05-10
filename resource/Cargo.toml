@@ -23,7 +23,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 thiserror = "2"
 cntm-nucleus = "0.3"
-jsonwebtoken = "9"
 chorus-rs = { version = "0.2.0", git = "https://github.com/cntm-labs/chorus.git", tag = "chorus-rs-v0.2.0" }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }

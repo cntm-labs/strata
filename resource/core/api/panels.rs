@@ -143,7 +143,7 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    /// UUID injected by `inject_mock_tenant` middleware in tests.
+    /// UUID injected by `inject_tenant` middleware in tests.
     const MOCK_TENANT: Uuid = Uuid::from_u128(0);
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
@@ -167,7 +167,7 @@ mod tests {
         };
         panel_routes_nested()
             .layer(axum::middleware::from_fn(
-                crate::middleware::tenant::inject_mock_tenant,
+                crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state)
     }

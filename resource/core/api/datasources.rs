@@ -186,7 +186,7 @@ mod tests {
         };
         datasource_routes()
             .layer(axum::middleware::from_fn(
-                crate::middleware::tenant::inject_mock_tenant,
+                crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state)
     }

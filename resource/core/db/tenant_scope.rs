@@ -190,7 +190,7 @@ mod tests {
         let app: Router = Router::new()
             .route("/x", get(extractor_probe_handler))
             .layer(axum::middleware::from_fn(
-                crate::middleware::tenant::inject_mock_tenant,
+                crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state);
         let resp = app
@@ -225,7 +225,7 @@ mod tests {
         let app: Router = Router::new()
             .route("/x", get(extractor_probe_handler))
             .layer(axum::middleware::from_fn(
-                crate::middleware::tenant::inject_mock_tenant,
+                crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state);
         pool.close().await;

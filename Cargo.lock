@@ -2666,7 +2666,6 @@ dependencies = [
  "cntm-nucleus",
  "dotenvy",
  "http-body-util",
- "jsonwebtoken",
  "metrics",
  "metrics-exporter-prometheus",
  "reqwest",
