@@ -284,6 +284,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cntm-nucleus"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c9bfaa64abebfe9c41cc99c0ea723d44621ce5a0b3030575fc72111e55975cc"
+dependencies = [
+ "jsonwebtoken",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2648,6 +2663,7 @@ dependencies = [
  "axum",
  "chorus-rs",
  "chrono",
+ "cntm-nucleus",
  "dotenvy",
  "http-body-util",
  "jsonwebtoken",
