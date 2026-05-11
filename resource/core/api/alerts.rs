@@ -327,7 +327,8 @@ mod tests {
                 strata_env: None,
                 host: "127.0.0.1".into(),
                 port: 3000,
-                nucleus_secret_key: None,
+                nucleus_api_key: None,
+                nucleus_jwks_cache_ttl_secs: None,
                 nucleus_base_url: None,
                 resend_api_key: None,
                 alert_from_email: "test@test.com".into(),
@@ -336,7 +337,7 @@ mod tests {
         };
         alert_routes()
             .layer(axum::middleware::from_fn(
-                crate::middleware::tenant::inject_mock_tenant,
+                crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state)
     }

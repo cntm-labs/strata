@@ -5,7 +5,7 @@
 #   2. tofu plan      (review carefully — this provisions ~$175/mo of AWS resources)
 #   3. tofu apply
 #
-# Sensitive variables (NUCLEUS_SECRET_KEY, RESEND_API_KEY, SENTRY_DSN)
+# Sensitive variables (NUCLEUS_API_KEY, RESEND_API_KEY, SENTRY_DSN)
 # should be passed via TF_VAR_* env vars, not terraform.tfvars files,
 # to keep them out of version control. Generated secrets (Postgres
 # password, strata_app password) are managed by the secrets module.
@@ -48,10 +48,10 @@ module "vpc" {
 module "secrets" {
   source = "../modules/secrets"
 
-  name_prefix        = local.name
-  nucleus_secret_key = var.nucleus_secret_key
-  resend_api_key     = var.resend_api_key
-  sentry_dsn         = var.sentry_dsn
+  name_prefix     = local.name
+  nucleus_api_key = var.nucleus_api_key
+  resend_api_key  = var.resend_api_key
+  sentry_dsn      = var.sentry_dsn
 }
 
 module "rds" {

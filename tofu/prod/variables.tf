@@ -61,7 +61,7 @@ variable "desired_count" {
 
 # === Secrets — pass via TF_VAR_* env vars, never via .tfvars files ===
 
-variable "nucleus_secret_key" {
+variable "nucleus_api_key" {
   description = "Nucleus JWT signing key"
   type        = string
   sensitive   = true

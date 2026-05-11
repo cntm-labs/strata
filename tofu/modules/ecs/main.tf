@@ -93,7 +93,7 @@ resource "aws_ecs_task_definition" "this" {
       { name = "DATABASE_URL_ADMIN", valueFrom = var.secret_arns_by_name.database_url_admin },
       { name = "DATABASE_URL", valueFrom = var.secret_arns_by_name.database_url },
       { name = "STRATA_APP_PASSWORD", valueFrom = var.secret_arns_by_name.strata_app_password },
-      { name = "NUCLEUS_SECRET_KEY", valueFrom = var.secret_arns_by_name.nucleus },
+      { name = "NUCLEUS_API_KEY", valueFrom = var.secret_arns_by_name.nucleus },
       { name = "RESEND_API_KEY", valueFrom = var.secret_arns_by_name.resend },
       { name = "SENTRY_DSN", valueFrom = var.secret_arns_by_name.sentry_dsn },
     ]
