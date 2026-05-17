@@ -185,7 +185,8 @@ mod tests {
             notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
         };
         datasource_routes()
-            .layer(axum::middleware::from_fn(
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
                 crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state)

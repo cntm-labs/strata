@@ -189,7 +189,8 @@ mod tests {
         };
         let app: Router = Router::new()
             .route("/x", get(extractor_probe_handler))
-            .layer(axum::middleware::from_fn(
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
                 crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state);
@@ -224,7 +225,8 @@ mod tests {
         };
         let app: Router = Router::new()
             .route("/x", get(extractor_probe_handler))
-            .layer(axum::middleware::from_fn(
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
                 crate::middleware::tenant::inject_tenant,
             ))
             .with_state(state);

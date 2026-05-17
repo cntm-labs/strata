@@ -109,31 +109,30 @@ mod tests {
 
     fn test_app(db: sqlx::PgPool) -> axum::Router {
         // Mount via datasource routes since query is nested under /{id}/query
+        let state = crate::AppState {
+            pool: db,
+            config: crate::config::AppConfig {
+                database_url: String::new(),
+                database_url_admin: None,
+                strata_app_password: None,
+                sentry_dsn: None,
+                strata_env: None,
+                host: "127.0.0.1".into(),
+                port: 3000,
+                nucleus_api_key: None,
+                nucleus_jwks_cache_ttl_secs: None,
+                nucleus_base_url: None,
+                resend_api_key: None,
+                alert_from_email: "test@test.com".into(),
+            },
+            notifier: std::sync::Arc::new(crate::notifier::Notifier::new(None, "test@test.com")),
+        };
         crate::api::datasources::datasource_routes()
-            .layer(axum::middleware::from_fn(
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
                 crate::middleware::tenant::inject_tenant,
             ))
-            .with_state(crate::AppState {
-                pool: db,
-                config: crate::config::AppConfig {
-                    database_url: String::new(),
-                    database_url_admin: None,
-                    strata_app_password: None,
-                    sentry_dsn: None,
-                    strata_env: None,
-                    host: "127.0.0.1".into(),
-                    port: 3000,
-                    nucleus_api_key: None,
-                    nucleus_jwks_cache_ttl_secs: None,
-                    nucleus_base_url: None,
-                    resend_api_key: None,
-                    alert_from_email: "test@test.com".into(),
-                },
-                notifier: std::sync::Arc::new(crate::notifier::Notifier::new(
-                    None,
-                    "test@test.com",
-                )),
-            })
+            .with_state(state)
     }
 
     fn json_request(uri: &str, body: serde_json::Value) -> Request<Body> {
