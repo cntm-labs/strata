@@ -47,7 +47,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1/explore", api::explore::explore_routes())
         .nest("/api/v1/alerts", api::alerts::alert_routes())
         .nest("/api/v1/templates", api::templates::template_routes())
-        .layer(axum::middleware::from_fn(middleware::tenant::inject_tenant));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::tenant::inject_tenant,
+        ));
 
     let protected = if let Some(api_key) = state.config.nucleus_api_key.as_deref() {
         let client = Arc::new(cntm_nucleus::NucleusClient::new(
