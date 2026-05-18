@@ -1,11 +1,11 @@
-import { useAuth } from '@/composables/useAuth'
+import { Nucleus } from '@cntm-labs/nucleus-js'
+import router from '@/router'
 
 const BASE_URL = '/api/v1'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const { getToken, clearToken } = useAuth()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const jwt = getToken()
+  const jwt = Nucleus.getToken()
   if (jwt) {
     headers['Authorization'] = `Bearer ${jwt}`
   }
@@ -16,8 +16,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   })
 
   if (res.status === 401) {
-    clearToken()
-    window.location.href = '/login'
+    await Nucleus.signOut()
+    router.push({ name: 'login' })
     throw new Error('Unauthorized')
   }
 

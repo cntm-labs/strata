@@ -9,7 +9,7 @@ describe('router', () => {
 
   const expectedRoutes = [
     '/login',
-    '/auth/callback',
+    '/__nucleus/oauth/callback',
     '/dashboards',
     '/dashboards/new',
     '/dashboards/:slug',

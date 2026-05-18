@@ -18,6 +18,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // Workaround for cntm-labs/nucleus#102 — mirrors the alias in
+      // vite.config.ts so tests can import the SDK.
+      '@cntm-labs/nucleus-js': fileURLToPath(
+        new URL('./node_modules/@cntm-labs/nucleus-js/dist/index.js', import.meta.url),
+      ),
     },
   },
 })

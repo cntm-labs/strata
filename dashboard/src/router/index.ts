@@ -10,9 +10,9 @@ const router = createRouter({
       component: () => import('@/views/LoginView.vue'),
     },
     {
-      path: '/auth/callback',
-      name: 'auth-callback',
-      component: () => import('@/views/AuthCallbackView.vue'),
+      path: '/__nucleus/oauth/callback',
+      name: 'nucleus-oauth-callback',
+      component: () => import('@/views/NucleusOAuthCallbackView.vue'),
     },
     {
       path: '/',
@@ -101,7 +101,7 @@ if (authEnabled) {
 
   router.beforeEach((to) => {
     const { isAuthenticated } = useAuth()
-    const publicRoutes = ['login', 'auth-callback']
+    const publicRoutes = ['login', 'nucleus-oauth-callback']
     if (!publicRoutes.includes(to.name as string) && !isAuthenticated.value) {
       return { name: 'login' }
     }

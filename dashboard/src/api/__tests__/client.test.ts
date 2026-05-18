@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { useAuth } from '@/composables/useAuth'
+
+const { NucleusMock, RouterMock } = vi.hoisted(() => {
+  const NucleusMock = {
+    getToken: vi.fn<() => string | null>(() => null),
+    signOut: vi.fn(async () => {
+      // simulate localStorage clear
+    }),
+  }
+  const RouterMock = {
+    push: vi.fn(),
+  }
+  return { NucleusMock, RouterMock }
+})
+
+vi.mock('@cntm-labs/nucleus-js', () => ({ Nucleus: NucleusMock }))
+vi.mock('@/router', () => ({ default: RouterMock }))
 
 const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
@@ -8,7 +23,9 @@ const { api } = await import('../client')
 
 beforeEach(() => {
   mockFetch.mockReset()
-  useAuth().clearToken()
+  NucleusMock.getToken.mockReset().mockReturnValue(null)
+  NucleusMock.signOut.mockReset().mockResolvedValue(undefined)
+  RouterMock.push.mockReset()
 })
 
 describe('api client', () => {
@@ -75,6 +92,21 @@ describe('api client', () => {
         body: JSON.stringify({ title: 'Updated' }),
       })
     })
+
+    it('sends PUT without body when no data', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({}),
+      })
+
+      await api.put('/dashboards/slug')
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/v1/dashboards/slug', {
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PUT',
+        body: undefined,
+      })
+    })
   })
 
   describe('delete', () => {
@@ -127,14 +159,8 @@ describe('api client', () => {
   })
 
   describe('authentication', () => {
-    it('attaches Bearer token when authenticated', async () => {
-      const { setToken } = useAuth()
-      // Minimal valid JWT structure (header.payload.signature)
-      const fakeJwt =
-        'eyJhbGciOiJFUzI1NiJ9.' +
-        btoa(JSON.stringify({ sub: '1', email: 'test@test.com' })) +
-        '.fakesig'
-      setToken(fakeJwt)
+    it('attaches Bearer token when Nucleus has a session', async () => {
+      NucleusMock.getToken.mockReturnValue('jwt-xyz')
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -146,12 +172,12 @@ describe('api client', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/v1/dashboards', {
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${fakeJwt}`,
+          Authorization: 'Bearer jwt-xyz',
         },
       })
     })
 
-    it('does not attach Authorization header when not authenticated', async () => {
+    it('does not attach Authorization header when no token', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: 'ok' }),
@@ -164,28 +190,14 @@ describe('api client', () => {
       })
     })
 
-    it('clears token and redirects on 401', async () => {
-      const { setToken, getToken } = useAuth()
-      const fakeJwt =
-        'eyJhbGciOiJFUzI1NiJ9.' +
-        btoa(JSON.stringify({ sub: '1', email: 'test@test.com' })) +
-        '.fakesig'
-      setToken(fakeJwt)
-
-      const mockLocation = { href: '' }
-      vi.stubGlobal('location', mockLocation)
-
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-      })
+    it('calls Nucleus.signOut and router.push on 401', async () => {
+      NucleusMock.getToken.mockReturnValue('jwt-1')
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
 
       await expect(api.get('/protected')).rejects.toThrow('Unauthorized')
-      expect(getToken()).toBeNull()
-      expect(mockLocation.href).toBe('/login')
 
-      vi.unstubAllGlobals()
-      vi.stubGlobal('fetch', mockFetch)
+      expect(NucleusMock.signOut).toHaveBeenCalledTimes(1)
+      expect(RouterMock.push).toHaveBeenCalledWith({ name: 'login' })
     })
   })
 })
