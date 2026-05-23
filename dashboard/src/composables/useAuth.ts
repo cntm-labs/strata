@@ -1,45 +1,40 @@
 import { ref, computed } from 'vue'
+import { Nucleus } from '@cntm-labs/nucleus-js'
 
-interface User {
-  id: string
-  email: string
-  firstName?: string
-  lastName?: string
-  avatarUrl?: string
+const tick = ref(0)
+let subscribed = false
+
+function ensureSubscribed() {
+  if (subscribed) return
+  Nucleus.addListener(() => {
+    tick.value++
+  })
+  subscribed = true
 }
 
-const token = ref<string | null>(null)
-const user = ref<User | null>(null)
-
 export function useAuth() {
-  const isAuthenticated = computed(() => !!token.value)
+  ensureSubscribed()
 
-  function setToken(jwt: string) {
-    token.value = jwt
-    try {
-      const payloadPart = jwt.split('.')[1]
-      if (!payloadPart) throw new Error('Invalid JWT')
-      const payload = JSON.parse(atob(payloadPart))
-      user.value = {
-        id: payload.sub,
-        email: payload.email,
-        firstName: payload.first_name,
-        lastName: payload.last_name,
-        avatarUrl: payload.avatar_url,
-      }
-    } catch {
-      user.value = null
-    }
-  }
-
-  function clearToken() {
-    token.value = null
-    user.value = null
-  }
+  const user = computed(() => {
+    void tick.value
+    return Nucleus.user
+  })
+  const organization = computed(() => {
+    void tick.value
+    return Nucleus.organization
+  })
+  const isAuthenticated = computed(() => {
+    void tick.value
+    return Nucleus.isSignedIn
+  })
 
   function getToken(): string | null {
-    return token.value
+    return Nucleus.getToken()
   }
 
-  return { token, user, isAuthenticated, setToken, clearToken, getToken }
+  async function signOut(): Promise<void> {
+    await Nucleus.signOut()
+  }
+
+  return { user, organization, isAuthenticated, getToken, signOut }
 }

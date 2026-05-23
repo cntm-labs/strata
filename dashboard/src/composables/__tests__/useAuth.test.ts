@@ -1,93 +1,120 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { useAuth } from '../useAuth'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-function makeJwt(payload: Record<string, unknown>): string {
-  const header = btoa(JSON.stringify({ alg: 'ES256' }))
-  const body = btoa(JSON.stringify(payload))
-  return `${header}.${body}.fakesignature`
-}
+// `vi.mock` is hoisted above imports. Anything the mock factory references
+// must be hoisted too, so we use `vi.hoisted` to lift our shared mock state
+// alongside it.
+const { NucleusMock, listeners, fireListeners } = vi.hoisted(() => {
+  const listeners: Array<() => void> = []
+  const NucleusMock = {
+    user: null as { id: string; email: string } | null,
+    organization: null as { id: string; name: string; slug: string } | null,
+    session: null as { token: string } | null,
+    get isSignedIn() {
+      return NucleusMock.user !== null && NucleusMock.session !== null
+    },
+    getToken: vi.fn(() => NucleusMock.session?.token ?? null),
+    signOut: vi.fn(async () => {
+      NucleusMock.user = null
+      NucleusMock.organization = null
+      NucleusMock.session = null
+      listeners.forEach((l) => l())
+    }),
+    addListener: vi.fn((fn: () => void) => {
+      listeners.push(fn)
+      return () => {
+        const i = listeners.indexOf(fn)
+        if (i >= 0) listeners.splice(i, 1)
+      }
+    }),
+  }
+  function fireListeners() {
+    listeners.forEach((l) => l())
+  }
+  return { NucleusMock, listeners, fireListeners }
+})
+
+vi.mock('@cntm-labs/nucleus-js', () => ({ Nucleus: NucleusMock }))
+
+import { useAuth } from '../useAuth'
 
 describe('useAuth', () => {
   beforeEach(() => {
-    useAuth().clearToken()
+    NucleusMock.user = null
+    NucleusMock.organization = null
+    NucleusMock.session = null
+    NucleusMock.getToken.mockClear()
+    NucleusMock.signOut.mockClear()
+    fireListeners()
   })
 
-  it('starts unauthenticated', () => {
-    const { isAuthenticated, token, user, getToken } = useAuth()
+  it('reflects signed-out state when Nucleus is unsigned', () => {
+    const { isAuthenticated, user } = useAuth()
     expect(isAuthenticated.value).toBe(false)
-    expect(token.value).toBeNull()
     expect(user.value).toBeNull()
-    expect(getToken()).toBeNull()
   })
 
-  it('setToken stores token and decodes user', () => {
-    const { setToken, isAuthenticated, token, user, getToken } = useAuth()
-    const jwt = makeJwt({
-      sub: 'user-123',
-      email: 'alice@test.com',
-      first_name: 'Alice',
-      last_name: 'Wonder',
-      avatar_url: 'https://img.test/alice.png',
-    })
+  it('reflects signed-in state after Nucleus signs in', () => {
+    const { isAuthenticated, user } = useAuth()
+    expect(isAuthenticated.value).toBe(false)
 
-    setToken(jwt)
+    NucleusMock.user = { id: 'u-1', email: 'alice@test.com' }
+    NucleusMock.session = { token: 'jwt-1' }
+    fireListeners()
 
     expect(isAuthenticated.value).toBe(true)
-    expect(token.value).toBe(jwt)
-    expect(getToken()).toBe(jwt)
-    expect(user.value).toEqual({
-      id: 'user-123',
-      email: 'alice@test.com',
-      firstName: 'Alice',
-      lastName: 'Wonder',
-      avatarUrl: 'https://img.test/alice.png',
-    })
+    expect(user.value).toEqual({ id: 'u-1', email: 'alice@test.com' })
   })
 
-  it('setToken handles missing optional fields', () => {
-    const { setToken, user } = useAuth()
-    const jwt = makeJwt({ sub: 'user-456', email: 'bob@test.com' })
+  it('reflects organization changes', () => {
+    const { organization } = useAuth()
+    expect(organization.value).toBeNull()
 
-    setToken(jwt)
+    NucleusMock.organization = { id: 'org-1', name: 'Acme', slug: 'acme' }
+    fireListeners()
 
-    expect(user.value).toEqual({
-      id: 'user-456',
-      email: 'bob@test.com',
-      firstName: undefined,
-      lastName: undefined,
-      avatarUrl: undefined,
-    })
+    expect(organization.value).toEqual({ id: 'org-1', name: 'Acme', slug: 'acme' })
   })
 
-  it('setToken sets user to null on invalid JWT', () => {
-    const { setToken, user, token } = useAuth()
-
-    setToken('not-a-valid-jwt')
-
-    expect(token.value).toBe('not-a-valid-jwt')
-    expect(user.value).toBeNull()
+  it('getToken proxies Nucleus.getToken', () => {
+    NucleusMock.session = { token: 'jwt-xyz' }
+    const { getToken } = useAuth()
+    expect(getToken()).toBe('jwt-xyz')
+    expect(NucleusMock.getToken).toHaveBeenCalled()
   })
 
-  it('clearToken resets all state', () => {
-    const { setToken, clearToken, isAuthenticated, token, user, getToken } = useAuth()
-    setToken(makeJwt({ sub: '1', email: 'test@test.com' }))
+  it('signOut calls Nucleus.signOut and updates reactive state', async () => {
+    NucleusMock.user = { id: 'u-1', email: 'alice@test.com' }
+    NucleusMock.session = { token: 'jwt-1' }
+    fireListeners()
+
+    const { isAuthenticated, signOut } = useAuth()
     expect(isAuthenticated.value).toBe(true)
 
-    clearToken()
+    await signOut()
 
+    expect(NucleusMock.signOut).toHaveBeenCalled()
     expect(isAuthenticated.value).toBe(false)
-    expect(token.value).toBeNull()
-    expect(user.value).toBeNull()
-    expect(getToken()).toBeNull()
   })
 
-  it('shares state across multiple useAuth() calls (singleton)', () => {
+  it('shares state across multiple useAuth() calls (singleton subscription)', () => {
     const auth1 = useAuth()
     const auth2 = useAuth()
 
-    auth1.setToken(makeJwt({ sub: '1', email: 'shared@test.com' }))
+    NucleusMock.user = { id: 'u-1', email: 'shared@test.com' }
+    NucleusMock.session = { token: 'jwt-1' }
+    fireListeners()
 
+    expect(auth1.isAuthenticated.value).toBe(true)
     expect(auth2.isAuthenticated.value).toBe(true)
     expect(auth2.user.value?.email).toBe('shared@test.com')
+  })
+
+  it('registers exactly one listener even with many useAuth() calls', () => {
+    const initial = listeners.length
+    useAuth()
+    useAuth()
+    useAuth()
+    // ensureSubscribed runs at most once across the module's lifetime.
+    expect(listeners.length).toBe(initial)
   })
 })

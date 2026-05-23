@@ -15,12 +15,12 @@
       <div class="flex items-center gap-3">
         <div class="avatar placeholder">
           <div class="bg-neutral text-neutral-content w-8 rounded-full">
-            <img v-if="user.avatarUrl" :src="user.avatarUrl" />
+            <img v-if="user.avatar_url" :src="user.avatar_url" />
             <span v-else>{{ initials }}</span>
           </div>
         </div>
         <div class="flex-1 min-w-0">
-          <div class="text-sm font-medium truncate">{{ user.firstName || user.email }}</div>
+          <div class="text-sm font-medium truncate">{{ user.first_name || user.email }}</div>
         </div>
         <button class="btn btn-ghost btn-xs" @click="logout">
           <i class="pi pi-sign-out" />
@@ -36,17 +36,17 @@ import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 
 const router = useRouter()
-const { user, clearToken } = useAuth()
+const { user, signOut } = useAuth()
 
 const initials = computed(() => {
   if (!user.value) return ''
-  const first = user.value.firstName?.[0] ?? ''
-  const last = user.value.lastName?.[0] ?? ''
+  const first = user.value.first_name?.[0] ?? ''
+  const last = user.value.last_name?.[0] ?? ''
   return (first + last).toUpperCase() || user.value.email?.[0]?.toUpperCase() || '?'
 })
 
-function logout() {
-  clearToken()
+async function logout() {
+  await signOut()
   router.push('/login')
 }
 

@@ -13,7 +13,7 @@ Strata is an open-source observability dashboard — a general-purpose Grafana a
 - **Log Viewer:** xterm.js (raw log streaming)
 - **Dashboard Layout:** vue-grid-layout (drag-and-drop panels)
 - **Database:** PostgreSQL (dashboards, panels, alerts, user preferences)
-- **Auth:** Nucleus (integrated via `cntm-nucleus` SDK, RS256 JWT verified against JWKS endpoint, optional via NUCLEUS_API_KEY — when unset, requests run as the default tenant)
+- **Auth:** Nucleus — backend uses `cntm-nucleus` SDK (RS256 JWT verified against JWKS, optional via `NUCLEUS_API_KEY` — when unset, requests run as the default tenant); frontend uses `@cntm-labs/nucleus-js` SDK (session/refresh/OAuth via `VITE_NUCLEUS_PUBLISHABLE_KEY` + `VITE_NUCLEUS_BASE_URL`, gated by `VITE_AUTH_ENABLED`)
 - **Alerting:** Chorus (email via Resend, embedded chorus-rs library, optional via RESEND_API_KEY)
 - **Data Sources:** Prometheus (PromQL), Loki (LogQL), PostgreSQL (SQL)
 
