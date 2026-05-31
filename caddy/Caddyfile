@@ -2,10 +2,18 @@
     email {$ACME_EMAIL}
 }
 
-dashboard.strata-cntm.labs {
+dashboard.{$STRATA_DOMAIN} {
+    encode zstd gzip
     reverse_proxy strata:3000
+    log {
+        output file /var/log/caddy/dashboard.log
+    }
 }
 
-api.strata-cntm.labs {
+api.{$STRATA_DOMAIN} {
+    encode zstd gzip
     reverse_proxy strata:3000
+    log {
+        output file /var/log/caddy/api.log
+    }
 }
