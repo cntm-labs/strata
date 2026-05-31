@@ -2,13 +2,18 @@
     email {$ACME_EMAIL}
 }
 
-{$STRATA_DOMAIN} {
+dashboard.{$STRATA_DOMAIN} {
     encode zstd gzip
-
     reverse_proxy strata:3000
-
     log {
-        output stdout
-        format json
+        output file /var/log/caddy/dashboard.log
+    }
+}
+
+api.{$STRATA_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy strata:3000
+    log {
+        output file /var/log/caddy/api.log
     }
 }

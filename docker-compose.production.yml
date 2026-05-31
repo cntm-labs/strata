@@ -1,112 +1,104 @@
-# Production override for docker-compose.yml.
-# Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.production.yml \
-#                  --env-file .env.production up -d --build
-# Or simply: ./scripts/deploy.sh
+version: '3.8'
 
 services:
-  postgres:
-    ports: !reset []
-    environment:
-      POSTGRES_USER: strata
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: strata
-    command: ["postgres", "-c", "max_connections=200"]
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1G
-    networks:
-      - backend
-
-  strata:
-    ports: !reset []
-    build:
-      context: .
-      dockerfile: docker/strata.Dockerfile
-    environment:
-      DATABASE_URL_ADMIN: "postgres://strata:${POSTGRES_PASSWORD}@postgres:5432/strata"
-      DATABASE_URL: "postgres://strata_app:${STRATA_APP_PASSWORD}@postgres:5432/strata"
-      STRATA_APP_PASSWORD: ${STRATA_APP_PASSWORD}
-      HOST: "0.0.0.0"
-      PORT: "3000"
-      NUCLEUS_API_KEY: ${NUCLEUS_API_KEY:-}
-      NUCLEUS_BASE_URL: ${NUCLEUS_BASE_URL:-}
-      NUCLEUS_JWKS_CACHE_TTL_SECS: ${NUCLEUS_JWKS_CACHE_TTL_SECS:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      ALERT_FROM_EMAIL: ${ALERT_FROM_EMAIL:-alerts@strata.local}
-      SENTRY_DSN: ${SENTRY_DSN:-}
-      STRATA_ENV: ${STRATA_ENV:-production}
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 512M
-    networks:
-      - frontend
-      - backend
-
-  prometheus:
-    ports: !reset []
-    restart: unless-stopped
-    networks:
-      - backend
-
-  loki:
-    ports: !reset []
-    restart: unless-stopped
-    networks:
-      - backend
-
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.7-alpine
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-    environment:
-      STRATA_DOMAIN: ${STRATA_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
     networks:
-      - frontend
-    depends_on:
-      strata:
-        condition: service_healthy
+      - frontend-net
+      - backend-net
+    environment:
+      - STRATA_DOMAIN=${STRATA_DOMAIN:-strata-cntm.labs}
+      - ACME_EMAIL=${ACME_EMAIL}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 128M
+
+  strata:
+    build: 
+      context: .
+      dockerfile: docker/strata.Dockerfile
+    restart: unless-stopped
+    env_file: .env.production
+    networks:
+      - backend-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env.production
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend-net
+    # Port is NOT exposed to host in production
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   backup:
     build:
       context: .
       dockerfile: docker/backup.Dockerfile
     restart: unless-stopped
-    environment:
-      DATABASE_URL: "postgres://strata:${POSTGRES_PASSWORD}@postgres:5432/strata"
-      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
-      RETENTION_DAYS: ${RETENTION_DAYS:-14}
-      S3_BUCKET: ${S3_BUCKET:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
-    volumes:
-      - backup_data:/backups
-    networks:
-      - backend
+    env_file: .env.production
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
+    networks:
+      - backend-net
 
-volumes:
-  caddy_data:
-  caddy_config:
-  backup_data:
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./dev/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - backend-net
+    # Port is NOT exposed to host in production
+    expose:
+      - "9090"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    networks:
+      - backend-net
+    # Port is NOT exposed to host in production
+    expose:
+      - "3100"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
 
 networks:
-  frontend:
-  backend:
+  frontend-net:
+  backend-net:
     internal: true
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
